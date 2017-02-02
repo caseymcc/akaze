@@ -30,7 +30,7 @@ The following benchmarks are measured on the img1.pgm in the iguazu dataset prov
 | Descriptor    |            10            |    0.9    |
 
 ## Limitations
-- The CUDA version currently comes with some limitations. The maximum number of detected keypoints _before_ filtering is 8196 points per level. This constraint might be relatex in future updates. 
+- Previous limitations with respect to the number of keypoints are more or less gone. Set the maximum number of keypoints in AKAZEConfig.h. This is done since cuda memory is preallocated..
 - The only descriptor available is MLDB, as proposed in the original authors' paper.
 - Currently it only works with 4 octaves and 4 sub-levels (default settings).
 
@@ -56,6 +56,7 @@ If the GPU implementation isn't an option for you, have a look at the CPU-versio
 
 
 ## Python interface
+Compiling a python interface is off by default. Set USE_PYTHON to YES in src/CMakeLists.txt to add this functionality.
 I'm just a novice python user, so I cannot say much about the quality of this code. Anyway, I put together a python interface using boost::python, and pyboostcvconverter <https://github.com/Algomorph/pyboostcvconverter> and wrote a small test script computing akaze for two images and then matching the descriptors. The matcher returns a (\#keypoints x 8) numpy array corresponding to the two closest matches (see **Matcher** above). The interface resides in the python-directory and has its own cmake project. It is tested on Ubuntu 14.04 with boost 1.61 and python 2.7. It assumes that akaze is installed in /usr/local. **Important:** For it to work you need to copy the libakaze_pybindings.so to /usr/local/python2.7/dist-packages. Run test.py from the build directory, i.e. cd \<AKAZEROOT\>/python/build; python ../test.py. Suggestions on improvements of pull requests are appreciated.
 
 
