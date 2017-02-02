@@ -378,6 +378,7 @@ void AKAZE::Feature_Detection(std::vector<cv::KeyPoint>& kpts) {
 }
 
 
+#ifdef USE_PYTHON
 boost::python::tuple AKAZE::Compute_Descriptors_() {
 
     std::vector<cv::KeyPoint> kptsvec;
@@ -393,6 +394,7 @@ boost::python::tuple AKAZE::Compute_Descriptors_() {
     return boost::python::make_tuple(desc,kpts);
 
 }
+#endif // USE_PYTHON
 
 
 /* ************************************************************************* */

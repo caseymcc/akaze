@@ -2,8 +2,6 @@
 #include "cuda_akaze.h"
 #include "cudautils.h"
 
-#include <cuda_fp16.h>
-
 #define CONVROW_W 160
 #define CONVCOL_W 32
 #define CONVCOL_H 40
