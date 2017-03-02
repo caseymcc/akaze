@@ -1,0 +1,6 @@
+hunter_config(OpenCV VERSION 3.1.0-p2 
+CMAKE_ARGS 
+    BUILD_SHARED_LIBS=ON 
+    WITH_OPENCL=ON
+    WITH_CUDA=OFF
+)

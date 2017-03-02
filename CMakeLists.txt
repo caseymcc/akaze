@@ -1,6 +1,16 @@
-project(AKAZECU)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/Hunter/HunterGate.cmake)
 
-cmake_minimum_required (VERSION 2.6)
+HunterGate(
+    URL "https://github.com/ruslo/hunter/archive/v0.17.12.tar.gz"
+    SHA1 "74cfa490ef0d3ff8916523bbf5add53049aad7be"
+    LOCAL
+)
+
+project(AKAZE)
+
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/CMakeModules)
+
+cmake_minimum_required (VERSION 3.0)
 if (COMMAND cmake_policy)
   cmake_policy(SET CMP0003 NEW)
 endif ()
