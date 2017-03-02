@@ -19,10 +19,45 @@
 // OpenCV
 #include <opencv2/features2d/features2d.hpp>
 
+#ifdef USE_PYTHON
+// Boost
+#include <boost/python.hpp>
+#endif
+
+
 /* ************************************************************************* */
 namespace libAKAZECU {
 
-  class AKAZE {
+    class Matcher {
+	
+    private:
+	int maxnquery;
+	unsigned char* descq_d;
+
+	int maxntrain;
+	unsigned char* desct_d;
+
+	cv::DMatch* dmatches_d;
+	cv::DMatch* dmatches_h;
+
+	size_t pitch;
+	
+    public:
+	Matcher() : maxnquery(0), descq_d(NULL), maxntrain(0), desct_d(NULL),
+	    dmatches_d(0), dmatches_h(0), pitch(0) {}
+
+	~Matcher();
+
+	// python
+	cv::Mat bfmatch_(cv::Mat desc_query, cv::Mat desc_train);
+	
+	void bfmatch(cv::Mat &desc_query, cv::Mat &desc_train,
+		     std::vector<std::vector<cv::DMatch> > &dmatches);
+	
+    };
+
+
+    class AKAZE {
 
   private:
 
@@ -49,7 +84,7 @@ namespace libAKAZECU {
     cv::KeyPoint *cuda_bufferpoints;
     cv::Mat cuda_desc;
     float* cuda_descbuffer;
-    short* cuda_ptindices;
+    int* cuda_ptindices;
     CudaImage *cuda_images;
     std::vector<CudaImage> cuda_buffers;
     int nump;
@@ -74,6 +109,7 @@ namespace libAKAZECU {
 
     /// @brief This method selects interesting keypoints through the nonlinear scale space
     /// @param kpts Vector of detected keypoints
+	cv::Mat Feature_Detection_();
     void Feature_Detection(std::vector<cv::KeyPoint>& kpts);
 
     /// This method computes the feature detector response for the nonlinear scale space
@@ -90,7 +126,10 @@ namespace libAKAZECU {
     void Do_Subpixel_Refinement(std::vector<cv::KeyPoint>& kpts);
 
     /// Feature description methods
-    void Compute_Descriptors(std::vector<cv::KeyPoint>& kpts, cv::Mat& desc);
+#ifdef USE_PYTHON
+      boost::python::tuple Compute_Descriptors_();
+#endif // USE_PYTHON
+      void Compute_Descriptors(std::vector<cv::KeyPoint>& kpts, cv::Mat& desc);
 
     /// This method saves the scale space into jpg images
     void Save_Scale_Space();

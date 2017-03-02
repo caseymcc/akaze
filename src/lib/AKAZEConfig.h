@@ -107,9 +107,12 @@ struct AKAZEOptions {
     verbosity = false;
 
     ncudaimages = 4;
-    maxkeypoints = 8192;
+    maxkeypoints = 16*8192;
   }
 
+    void setWidth(int w) {img_width=w;}
+    void setHeight(int h) {img_height=h;}
+    
   int omin;                       ///< Initial octave level (-1 means that the size of the input image is duplicated)
   int omax;                       ///< Maximum octave evolution of the image 2^sigma (coarsest scale sigma units)
   int nsublevels;                 ///< Default number of sublevels per scale level
@@ -143,7 +146,7 @@ struct AKAZEOptions {
                                   const AKAZEOptions& akaze_options) {
 
     os << std::left;
-#define CHECK_AKAZE_OPTION(option) \
+#define CHECK_AKAZE_OPTION(option)					\
   os << std::setw(33) << #option << " =  " << option << std::endl
 
     // Scale-space parameters.

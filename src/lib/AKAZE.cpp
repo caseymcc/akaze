@@ -24,8 +24,103 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <cstdio>  //%%%%
 
+#include <cuda.h>
+#include <cuda_runtime_api.h>
+
 using namespace std;
 using namespace libAKAZECU;
+
+
+
+/* ************************************************************************* */
+void Matcher::bfmatch(cv::Mat &desc_query, cv::Mat &desc_train,
+		      std::vector<std::vector<cv::DMatch> > &dmatches) {
+    
+    if (maxnquery < desc_query.rows) {
+	if (descq_d) cudaFree(descq_d);
+	if (dmatches_d) cudaFree(dmatches_d);
+	cudaMallocPitch((void**)&descq_d, &pitch, 64, desc_query.rows);
+	cudaMemset2D(descq_d, pitch, 0, 64, desc_query.rows);
+	cudaMalloc((void**)&dmatches_d, desc_query.rows * 2 * sizeof(cv::DMatch));
+	if (dmatches_h) delete [] dmatches_h;
+	dmatches_h = new cv::DMatch[2 * desc_query.rows];
+	maxnquery = desc_query.rows;
+    }
+    if (maxntrain < desc_train.rows) {
+	if (desct_d) cudaFree(descq_d);
+	cudaMallocPitch((void**)&desct_d, &pitch, 64, desc_train.rows);
+	cudaMemset2DAsync(desct_d, pitch, 0, 64, desc_train.rows);
+	maxntrain = desc_train.rows;
+    }
+    
+    cudaMemcpy2DAsync(descq_d, pitch, desc_query.data, desc_query.cols,
+		      desc_query.cols, desc_query.rows, cudaMemcpyHostToDevice);
+    
+    cudaMemcpy2DAsync(desct_d, pitch, desc_train.data, desc_train.cols,
+		      desc_train.cols, desc_train.rows, cudaMemcpyHostToDevice);
+    
+    dim3 block(desc_query.rows);
+    
+    MatchDescriptors(desc_query, desc_train, dmatches, pitch,
+		     descq_d, desct_d, dmatches_d, dmatches_h);
+    
+    cudaMemcpy(dmatches_h, dmatches_d, desc_query.rows * 2 * sizeof(cv::DMatch),
+	       cudaMemcpyDeviceToHost);
+    
+    dmatches.clear();
+    for (int i = 0; i < desc_query.rows; ++i) {
+	std::vector<cv::DMatch> tdmatch;
+	//std::cout << dmatches_h[2*i].trainIdx << " - " << dmatches_h[2*i].queryIdx << std::endl;
+	tdmatch.push_back(dmatches_h[2 * i]);
+	tdmatch.push_back(dmatches_h[2 * i + 1]);
+	dmatches.push_back(tdmatch);
+    }
+    
+}
+
+
+cv::Mat Matcher::bfmatch_(cv::Mat desc_query, cv::Mat desc_train) {
+
+    std::vector<std::vector<cv::DMatch> > dmatches_vec;
+
+    bfmatch(desc_query, desc_train, dmatches_vec);
+    
+    cv::Mat dmatches_mat(dmatches_vec.size(), 8, CV_32FC1);
+
+    for (int i=0; i<dmatches_vec.size(); ++i) {
+	float* mdata = (float*)&dmatches_mat.data[i*8*sizeof(float)];
+
+	mdata[0] = dmatches_vec[i][0].queryIdx;
+	mdata[1] = dmatches_vec[i][0].trainIdx;
+	mdata[2] = 0.f;//dmatches_vec[i][0].imgIdx;
+	mdata[3] = dmatches_vec[i][0].distance;
+
+	mdata[4] = dmatches_vec[i][1].queryIdx;
+	mdata[5] = dmatches_vec[i][1].trainIdx;
+	mdata[6] = 0.f;//dmatches_vec[i][1].imgIdx;
+	mdata[7] = dmatches_vec[i][1].distance;
+    }
+    
+    return dmatches_mat;
+}
+
+
+Matcher::~Matcher() {
+    if (descq_d) {
+	cudaFree(descq_d);
+    }
+    if (desct_d) {
+	cudaFree(desct_d);
+    }
+    if (dmatches_d) {
+	cudaFree(dmatches_d);
+    }
+    if (dmatches_h) {
+	delete [] dmatches_h;
+    }
+}
+
+
 
 /* ************************************************************************* */
 AKAZE::AKAZE(const AKAZEOptions& options) : options_(options) {
@@ -176,9 +271,46 @@ int AKAZE::Create_Nonlinear_Scale_Space(const cv::Mat& img) {
 
   t2 = cv::getTickCount();
   timing_.scale = 1000.0 * (t2 - t1) / cv::getTickFrequency();
-
+  
   return 0;
 }
+
+
+void kpvec2mat(std::vector<cv::KeyPoint>& kpts, cv::Mat& _mat) {
+
+    _mat = cv::Mat(kpts.size(),7,CV_32FC1);
+    for (int i=0; i<(int)kpts.size(); ++i) {
+
+
+    }
+    
+}
+
+
+void mat2kpvec(cv::Mat& _mat, std::vector<cv::KeyPoint>& _kpts) {
+
+    for (int i=0; i<_mat.rows; ++i) {
+	cv::Vec<float,7> v = _mat.at<cv::Vec<float,7> >(i,0);
+	cv::KeyPoint kp(v[0],v[1],v[2],v[3],v[4],(int)v[5],(int)v[6]);
+	_kpts.push_back(kp);
+    }
+    
+}
+
+
+
+cv::Mat AKAZE::Feature_Detection_() {
+
+    std::vector<cv::KeyPoint> kpts;
+
+    this->Feature_Detection(kpts);
+
+    cv::Mat mat;
+    kpvec2mat(kpts,mat);
+
+    return mat;
+}
+
 
 /* ************************************************************************* */
 void AKAZE::Feature_Detection(std::vector<cv::KeyPoint>& kpts) {
@@ -244,6 +376,26 @@ void AKAZE::Feature_Detection(std::vector<cv::KeyPoint>& kpts) {
   timing_.extrema = 1000.0 * (t3 - t2) / cv::getTickFrequency();
   timing_.detector = 1000.0 * (t3 - t1) / cv::getTickFrequency();
 }
+
+
+#ifdef USE_PYTHON
+boost::python::tuple AKAZE::Compute_Descriptors_() {
+
+    std::vector<cv::KeyPoint> kptsvec;
+
+    this->Feature_Detection(kptsvec);
+    
+    cv::Mat desc;
+    cv::Mat kpts;
+    this->Compute_Descriptors(kptsvec,desc);
+    
+    kpvec2mat(kptsvec,kpts);
+
+    return boost::python::make_tuple(desc,kpts);
+
+}
+#endif // USE_PYTHON
+
 
 /* ************************************************************************* */
 /**

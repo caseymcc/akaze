@@ -4,6 +4,23 @@ find_package(OpenCV REQUIRED)
 find_package(Doxygen)
 find_package(CUDA)
 
+
+# ===================================
+# Set this to yes for python bindings
+set(USE_PYTHON YES)
+
+
+if(USE_PYTHON)
+  find_package(Boost COMPONENTS python)
+  find_package(PythonLibs)
+  if (Boost_python_FOUND AND PYTHONLIBS_FOUND)
+    include_directories(${PYTHON_INCLUDE_DIRS})
+    include_directories(${Boost_INCLUDE_DIR})
+  else()
+    set(USE_PYTHON NO)
+  endif()
+endif(USE_PYTHON)
+
 if (NOT APPLE)
   find_package(OpenMP)
 endif ()
@@ -13,7 +30,7 @@ endif ()
 IF(UNIX)
   SET(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS} -g -O0  -Wall -Wextra -Wunused-variable -DDEBUG -D_DEBUG")
   SET(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS} -O0 -g  -Wall -Wextra -Wunused-variable -DDEBUG -D_DEBUG")
-  LIST(APPEND CUDA_NVCC_FLAGS "-arch=sm_30;-lineinfo;--compiler-options;-O2")
+  LIST(APPEND CUDA_NVCC_FLAGS "-arch=sm_50;-lineinfo;--compiler-options;-O2")
 ENDIF(UNIX)
 
 if(OPENMP_FOUND)
@@ -52,6 +69,9 @@ set(AKAZE_SRCS
  
 add_library(AKAZE ${AKAZE_SRCS})
 target_link_libraries(AKAZE ${OpenCV_LIBS})
+if (USE_PYTHON)
+  target_link_libraries(AKAZE ${Boost_PYTHON_LIBRARY} ${PYTHON_LIBRARIES})
+endif()
 
 SET(AKAZE_CUDA_SRCS
   lib/cudaImage.cu lib/cuda_akaze.cu)
@@ -75,15 +95,18 @@ target_link_libraries(akaze_compare AKAZE AKAZE_CUDA)
 
 # ============================================================================ #
 # Library installation
-install(TARGETS AKAZE DESTINATION ${AKAZE_INSTALL_PREFIX})
+install(TARGETS AKAZE AKAZE_CUDA DESTINATION lib)
 install(FILES
     lib/AKAZE.h
     lib/fed.h
     lib/utils.h
     lib/nldiffusion_functions.h
     lib/AKAZEConfig.h
+    lib/cudaImage.h
+    lib/cuda_akaze.h
+    lib/cudautils.h
     DESTINATION
-    ${AKAZE_INCLUDE_PREFIX}
+    include
 )
 
 # ============================================================================ #

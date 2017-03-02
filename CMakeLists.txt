@@ -7,7 +7,7 @@ endif ()
 
 # ============================================================================ #
 # Build Type. By default is release
-set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the type of build, options are: Debug, Release" FORCE)
+set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build, options are: Debug, Release" FORCE)
 
 # ============================================================================ #
 # Where to output binaries and libraries
@@ -17,8 +17,8 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/bin")
 
 # ============================================================================ #
 # Where to install the AKAZE library
-set(AKAZE_INSTALL_PREFIX "/usr/local/akaze/lib" CACHE PATH "Installation Directory")
-set(AKAZE_INCLUDE_PREFIX "/usr/local/akaze/include" CACHE PATH "Includes Directory")
+set(AKAZE_INSTALL_PREFIX "/usr/local/lib" CACHE PATH "Installation Directory")
+set(AKAZE_INCLUDE_PREFIX "/usr/local/include" CACHE PATH "Includes Directory")
 
 # ============================================================================ #
 # CPP sources
