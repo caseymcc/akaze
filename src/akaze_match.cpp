@@ -25,6 +25,8 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
+#include <cuda_profiler_api.h>
+
 using namespace std;
 using namespace libAKAZECU;
 
@@ -110,6 +112,8 @@ int main(int argc, char *argv[]) {
 
   t1 = cv::getTickCount();
 
+  cudaProfilerStart();
+  
   evolution1.Create_Nonlinear_Scale_Space(img1_32);
   evolution1.Feature_Detection(kpts1);
   evolution1.Compute_Descriptors(kpts1, desc1);
@@ -128,16 +132,34 @@ int main(int argc, char *argv[]) {
 
   t1 = cv::getTickCount();
 
+  Matcher cuda_matcher;
+
+  cuda_matcher.bfmatch(desc1, desc2, dmatches);
+  cuda_matcher.bfmatch(desc2, desc1, dmatches);
+  //MatchDescriptors(desc1, desc2, dmatches);
+
+
+  std::cout << "#matches: " << dmatches.size() << std::endl;
+  std::cout << "#kptsq:   " << kpts1.size() << std::endl;
+  std::cout << "#kptst:   " << kpts2.size() << std::endl;
+  
+  cudaProfilerStop();
+  
+  t2 = cv::getTickCount();
+  tmatch = 1000.0*(t2 - t1)/ cv::getTickFrequency();
+
+  /*t1 = cv::getTickCount();
+
   if (options.descriptor < MLDB_UPRIGHT)
     matcher_l2->knnMatch(desc1, desc2, dmatches, 2);
   else
     matcher_l1->knnMatch(desc1, desc2, dmatches, 2);
 
   t2 = cv::getTickCount();
-  tmatch = 1000.0*(t2 - t1)/ cv::getTickFrequency();
+  tmatch = 1000.0*(t2 - t1)/ cv::getTickFrequency();*/
 
   // Compute Inliers!!
-  matches2points_nndr(kpts1, kpts2, dmatches, matches, DRATIO);
+  matches2points_nndr(kpts2, kpts1, dmatches, matches, DRATIO);
 
   if (use_ransac == false)
     compute_inliers_homography(matches, inliers, HG, MIN_H_ERROR);

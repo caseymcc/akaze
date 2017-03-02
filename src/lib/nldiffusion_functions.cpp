@@ -19,122 +19,91 @@
  * @author Pablo F. Alcantarilla, Jesus Nuevo
  */
 
+#include <cassert>
+#ifdef AKAZE_USE_OPENMP
+#include <omp.h>
+#endif  // AKAZE_USE_OPENMP
+#include <vector>
+
+#include "convolution.h"
 #include "nldiffusion_functions.h"
-#include <opencv2/imgproc/imgproc.hpp>
-#include <iostream>
 
-using namespace std;
+namespace libAKAZE
+{
 
-/* ************************************************************************* */
-void gaussian_2D_convolution(const cv::Mat& src, cv::Mat& dst, size_t ksize_x,
-                             size_t ksize_y, float sigma) {
+size_t computeKernelSize(float sigma)
+{
+    size_t kernelSize=ceil(2.0*(1.0+(sigma-0.8)/(0.3)));
 
-  // Compute an appropriate kernel size according to the specified sigma
-  if (sigma > ksize_x || sigma > ksize_y || ksize_x == 0 || ksize_y == 0) {
-    ksize_x = ceil(2.0*(1.0 + (sigma-0.8)/(0.3)));
-    ksize_y = ksize_x;
-  }
+    if((kernelSize%2)==0)
+        kernelSize+=1;
 
-  // The kernel size must be and odd number
-  if ((ksize_x % 2) == 0)
-    ksize_x += 1;
-
-  if ((ksize_y % 2) == 0)
-    ksize_y += 1;
-
-  // Perform the Gaussian Smoothing with border replication
-  cv::GaussianBlur(src, dst, cv::Size(ksize_x, ksize_y), sigma, sigma, cv::BORDER_REPLICATE);
+    return kernelSize;
 }
 
 /* ************************************************************************* */
-void image_derivatives_scharr(const cv::Mat& src, cv::Mat& dst,
+void gaussian_2D_convolution(const RowMatrixXf& src, RowMatrixXf& dst,
+                             size_t ksize_x, size_t ksize_y, float sigma) {
+  GaussianBlur(src, sigma, &dst);
+}
+
+/* ************************************************************************* */
+void image_derivatives_scharr(const RowMatrixXf& src, RowMatrixXf& dst,
                               const size_t xorder, const size_t yorder) {
-  cv::Scharr(src, dst, CV_32F, xorder, yorder, 1.0, 0, cv::BORDER_DEFAULT);
+  ScharrDerivative(src, xorder, yorder, 1.0, false, &dst);
 }
 
 /* ************************************************************************* */
-void pm_g1(const cv::Mat& Lx, const cv::Mat& Ly, cv::Mat& dst, const float k) {
-
-  cv::Size sz = Lx.size();
-  float inv_k = 1.0 / (k*k);
-  for (int y = 0; y < sz.height; y++) {
-    const float* Lx_row = Lx.ptr<float>(y);
-    const float* Ly_row = Ly.ptr<float>(y);
-    float* dst_row = dst.ptr<float>(y);
-    for (int x = 0; x < sz.width; x++)
-      dst_row[x] = (-inv_k*(Lx_row[x]*Lx_row[x] + Ly_row[x]*Ly_row[x]));
-  }
-
-  cv::exp(dst, dst);
+void pm_g1(const RowMatrixXf& Lx, const RowMatrixXf& Ly, RowMatrixXf& dst,
+           const float k) {
+  const float inv_k = 1.0 / (k * k);
+  dst = (-inv_k * (Lx.array().square() + Ly.array().square())).exp();
 }
 
 /* ************************************************************************* */
-void pm_g2(const cv::Mat& Lx, const cv::Mat& Ly, cv::Mat& dst, const float k) {
-
-  cv::Size sz = Lx.size();
-  float inv_k = 1.0 / (k*k);
-  for (int y = 0; y < sz.height; y++) {
-    const float* Lx_row = Lx.ptr<float>(y);
-    const float* Ly_row = Ly.ptr<float>(y);
-    float* dst_row = dst.ptr<float>(y);
-    for (int x = 0; x < sz.width; x++)
-      dst_row[x] = 1.0 / (1.0+inv_k*(Lx_row[x]*Lx_row[x] + Ly_row[x]*Ly_row[x]));
-  }
+void pm_g2(const RowMatrixXf& Lx, const RowMatrixXf& Ly, RowMatrixXf& dst,
+           const float k) {
+  const float inv_k = 1.0 / (k * k);
+  dst = (1.0 + inv_k * (Lx.array().square() + Ly.array().square())).inverse();
 }
 
 /* ************************************************************************* */
-void weickert_diffusivity(const cv::Mat& Lx, const cv::Mat& Ly, cv::Mat& dst, const float k) {
-
-  cv::Size sz = Lx.size();
-  float inv_k = 1.0 / (k*k);
-  for (int y = 0; y < sz.height; y++) {
-    const float* Lx_row = Lx.ptr<float>(y);
-    const float* Ly_row = Ly.ptr<float>(y);
-    float* dst_row = dst.ptr<float>(y);
-    for (int x = 0; x < sz.width; x++) {
-      float dL = inv_k*(Lx_row[x]*Lx_row[x] + Ly_row[x]*Ly_row[x]);
-      dst_row[x] = -3.315/(dL*dL*dL*dL);
+void weickert_diffusivity(const RowMatrixXf& Lx, const RowMatrixXf& Ly,
+                          RowMatrixXf& dst, const float k) {
+  dst.resize(Lx.rows(), Lx.cols());
+  const float inv_k = 1.0 / (k * k);
+  for (int y = 0; y < Lx.rows(); y++) {
+    for (int x = 0; x < Lx.cols(); x++) {
+      const float dL = inv_k * (Lx(y, x) * Lx(y, x) + Ly(y, x) * Ly(y, x));
+      dst(y, x) = -3.315 / (dL * dL * dL * dL);
     }
   }
-
-  cv::exp(dst, dst);
-  dst = 1.0 - dst;
+  dst = dst.array().exp();
+  dst = 1.0 - dst.array();
 }
 
 /* ************************************************************************* */
-void charbonnier_diffusivity(const cv::Mat& Lx, const cv::Mat& Ly, cv::Mat& dst, const float k) {
-
-  cv::Size sz = Lx.size();
-  float inv_k = 1.0 / (k*k);
-  for (int y = 0; y < sz.height; y++) {
-    const float* Lx_row = Lx.ptr<float>(y);
-    const float* Ly_row = Ly.ptr<float>(y);
-    float* dst_row = dst.ptr<float>(y);
-    for (int x = 0; x < sz.width; x++) {
-      float den = sqrt(1.0+inv_k*(Lx_row[x]*Lx_row[x] + Ly_row[x]*Ly_row[x]));
-      dst_row[x] = 1.0 / den;
-    }
-  }
+void charbonnier_diffusivity(const RowMatrixXf& Lx, const RowMatrixXf& Ly,
+                             RowMatrixXf& dst, const float k) {
+  const float inv_k = 1.0 / (k * k);
+  dst = 1.0 /
+        ((1.0 + inv_k * (Lx.array().square() + Ly.array().square())).sqrt());
 }
 
 /* ************************************************************************* */
-float compute_k_percentile(const cv::Mat& img, float perc, float gscale,
+float compute_k_percentile(const RowMatrixXf& img, float perc, float gscale,
                            size_t nbins, size_t ksize_x, size_t ksize_y) {
-
   size_t nbin = 0, nelements = 0, nthreshold = 0, k = 0;
   float kperc = 0.0, modg = 0.0, npoints = 0.0, hmax = 0.0;
 
   // Create the array for the histogram
-  float* hist = new float[nbins];
+  Eigen::VectorXf hist(nbins);
+  hist.setZero();
 
   // Create the matrices
-  cv::Mat gaussian = cv::Mat::zeros(img.rows, img.cols, CV_32F);
-  cv::Mat Lx = cv::Mat::zeros(img.rows, img.cols, CV_32F);
-  cv::Mat Ly = cv::Mat::zeros(img.rows, img.cols, CV_32F);
-
-  // Set the histogram to zero
-  for (size_t i = 0; i < nbins; i++)
-    hist[i] = 0.0;
+  RowMatrixXf gaussian(img.rows(), img.cols());
+  RowMatrixXf Lx(img.rows(), img.cols());
+  RowMatrixXf Ly(img.rows(), img.cols());
 
   // Perform the Gaussian convolution
   gaussian_2D_convolution(img, gaussian, ksize_x, ksize_y, gscale);
@@ -144,36 +113,24 @@ float compute_k_percentile(const cv::Mat& img, float perc, float gscale,
   image_derivatives_scharr(gaussian, Ly, 0, 1);
 
   // Skip the borders for computing the histogram
-  for (int y = 1; y < gaussian.rows-1; y++) {
-
-    const float* Lx_row = Lx.ptr<float>(y);
-    const float* Ly_row = Ly.ptr<float>(y);
-
-    for (int x = 1; x < gaussian.cols-1; x++) {
-
-      modg = Lx_row[x]*Lx_row[x] + Ly_row[x]*Ly_row[x];
-
+  for (int y = 1; y < gaussian.rows() - 1; y++) {
+    for (int x = 1; x < gaussian.cols() - 1; x++) {
+      modg = Lx(y, x) * Lx(y, x) + Ly(y, x) * Ly(y, x);
       // Get the maximum
-      if (modg > hmax)
-        hmax = modg;
+      if (modg > hmax) hmax = modg;
     }
   }
 
   hmax = sqrt(hmax);
 
   // Skip the borders for computing the histogram
-  for (int y = 1; y < gaussian.rows-1; y++) {
-
-    const float* Lx_row = Lx.ptr<float>(y);
-    const float* Ly_row = Ly.ptr<float>(y);
-
-    for (int x = 1; x < gaussian.cols-1; x++) {
-
-      modg = sqrt(Lx_row[x]*Lx_row[x] + Ly_row[x]*Ly_row[x]);
+  for (int y = 1; y < gaussian.rows() - 1; y++) {
+    for (int x = 1; x < gaussian.cols() - 1; x++) {
+      modg = sqrt(Lx(y, x) * Lx(y, x) + Ly(y, x) * Ly(y, x));
 
       // Find the correspondent bin
       if (modg != 0.0) {
-        nbin = floor(nbins*(modg/hmax));
+        nbin = floor(nbins * (modg / hmax));
 
         if (nbin == nbins) {
           nbin--;
@@ -186,7 +143,7 @@ float compute_k_percentile(const cv::Mat& img, float perc, float gscale,
   }
 
   // Now find the perc of the histogram percentile
-  nthreshold = (size_t)(npoints*perc);
+  nthreshold = (size_t)(npoints * perc);
 
   for (k = 0; nelements < nthreshold && k < nbins; k++)
     nelements = nelements + hist[k];
@@ -194,198 +151,157 @@ float compute_k_percentile(const cv::Mat& img, float perc, float gscale,
   if (nelements < nthreshold)
     kperc = 0.03;
   else
-    kperc = hmax*((float)(k)/(float)nbins);
+    kperc = hmax * ((float)(k) / (float) nbins);
 
-  delete [] hist;
   return kperc;
 }
 
 /* ************************************************************************* */
-void compute_scharr_derivatives(const cv::Mat& src, cv::Mat& dst, const size_t xorder,
-                                const size_t yorder, const size_t scale) {
-
-  cv::Mat kx, ky;
-  compute_derivative_kernels(kx, ky, xorder, yorder, scale);
-  cv::sepFilter2D(src, dst, CV_32F, kx, ky);
+void compute_scharr_derivatives(const RowMatrixXf& src,
+                                RowMatrixXf& dst,
+                                const size_t xorder, const size_t yorder,
+                                const size_t scale) {
+  ScharrDerivative(src, xorder, yorder, scale, true, &dst);
 }
 
 /* ************************************************************************* */
-void nld_step_scalar(cv::Mat& Ld, const cv::Mat& c, cv::Mat& Lstep, const float stepsize) {
-
-  Lstep = cv::Scalar(0);
-
-  // Diffusion all the image except borders
-#ifdef _OPENMP
-  omp_set_num_threads(OMP_MAX_THREADS);
+void nld_step_scalar(RowMatrixXf& Ld, const RowMatrixXf& c, RowMatrixXf& Lstep,
+                     const float stepsize) {
+  Lstep.resize(Ld.rows(), Ld.cols());
+#ifdef AKAZE_USE_OPENMP
 #pragma omp parallel for schedule(dynamic)
 #endif
-  for (int y = 1; y < Lstep.rows-1; y++) {
-    const float* c_row = c.ptr<float>(y);
-    const float* c_row_p = c.ptr<float>(y+1);
-    const float* c_row_m = c.ptr<float>(y-1);
-
-    float* Ld_row = Ld.ptr<float>(y);
-    float* Ld_row_p = Ld.ptr<float>(y+1);
-    float* Ld_row_m = Ld.ptr<float>(y-1);
-    float* Lstep_row = Lstep.ptr<float>(y);
-
-    for (int x = 1; x < Lstep.cols-1; x++) {
-      float xpos =  (c_row[x]+c_row[x+1])*(Ld_row[x+1]-Ld_row[x]);
-      float xneg =  (c_row[x-1]+c_row[x])*(Ld_row[x]-Ld_row[x-1]);
-      float ypos =  (c_row[x]+c_row_p[x])*(Ld_row_p[x]-Ld_row[x]);
-      float yneg =  (c_row_m[x]+c_row[x])*(Ld_row[x]-Ld_row_m[x]);
-      Lstep_row[x] = 0.5*stepsize*(xpos-xneg + ypos-yneg);
+  for (int y = 1; y < Lstep.rows() - 1; y++) {
+    for (int x = 1; x < Lstep.cols() - 1; x++) {
+      const float xpos = (c(y, x) + c(y, x + 1)) * (Ld(y, x + 1) - Ld(y, x));
+      const float xneg = (c(y, x - 1) + c(y, x)) * (Ld(y, x) - Ld(y, x - 1));
+      const float ypos = (c(y, x) + c(y + 1, x)) * (Ld(y + 1, x) - Ld(y, x));
+      const float yneg = (c(y - 1, x) + c(y, x)) * (Ld(y, x) - Ld(y - 1, x));
+      Lstep(y, x) = 0.5 * stepsize * (xpos - xneg + ypos - yneg);
     }
   }
 
-  // First row
-  const float* c_row = c.ptr<float>(0);
-  const float* c_row_p = c.ptr<float>(1);
-  float* Ld_row = Ld.ptr<float>(0);
-  float* Ld_row_p = Ld.ptr<float>(1);
-  float* Lstep_row = Lstep.ptr<float>(0);
-
-  for (int x = 1; x < Lstep.cols-1; x++) {
-    float xpos = (c_row[x]+c_row[x+1])*(Ld_row[x+1]-Ld_row[x]);
-    float xneg = (c_row[x-1]+c_row[x])*(Ld_row[x]-Ld_row[x-1]);
-    float ypos = (c_row[x]+c_row_p[x])*(Ld_row_p[x]-Ld_row[x]);
-    Lstep_row[x] = 0.5*stepsize*(xpos-xneg + ypos);
+  for (int x = 1; x < Lstep.cols() - 1; x++) {
+    const float xpos = (c(0, x) + c(0, x + 1)) * (Ld(0, x + 1) - Ld(0, x));
+    const float xneg = (c(0, x - 1) + c(0, x)) * (Ld(0, x) - Ld(0, x - 1));
+    const float ypos = (c(0, x) + c(1, x)) * (Ld(1, x) - Ld(0, x));
+    Lstep(0, x) = 0.5 * stepsize * (xpos - xneg + ypos);
   }
 
-  float xpos = (c_row[0]+c_row[1])*(Ld_row[1]-Ld_row[0]);
-  float ypos = (c_row[0]+c_row_p[0])*(Ld_row_p[0]-Ld_row[0]);
-  Lstep_row[0] = 0.5*stepsize*(xpos + ypos);
-
-  int x = Lstep.cols-1;
-  float xneg = (c_row[x-1]+c_row[x])*(Ld_row[x]-Ld_row[x-1]);
-  ypos = (c_row[x]+c_row_p[x])*(Ld_row_p[x]-Ld_row[x]);
-  Lstep_row[x] = 0.5*stepsize*(-xneg + ypos);
-
-  // Last row
-  c_row = c.ptr<float>(Lstep.rows-1);
-  c_row_p = c.ptr<float>(Lstep.rows-2);
-  Ld_row = Ld.ptr<float>(Lstep.rows-1);
-  Ld_row_p = Ld.ptr<float>(Lstep.rows-2);
-  Lstep_row = Lstep.ptr<float>(Lstep.rows-1);
-
-  for (int x = 1; x < Lstep.cols-1; x++) {
-    float xpos = (c_row[x]+c_row[x+1])*(Ld_row[x+1]-Ld_row[x]);
-    float xneg = (c_row[x-1]+c_row[x])*(Ld_row[x]-Ld_row[x-1]);
-    float ypos = (c_row[x]+c_row_p[x])*(Ld_row_p[x]-Ld_row[x]);
-    Lstep_row[x] = 0.5*stepsize*(xpos-xneg + ypos);
+  const int end_row = Lstep.rows() - 1;
+  for (int x = 1; x < Lstep.cols() - 1; x++) {
+    const float xpos = (c(end_row, x) + c(end_row, x + 1)) *
+                       (Ld(end_row, x + 1) - Ld(end_row, x));
+    const float xneg = (c(end_row, x - 1) + c(end_row, x)) *
+                       (Ld(end_row, x) - Ld(end_row, x - 1));
+    const float ypos = (c(end_row, x) + c(end_row - 1, x)) *
+                       (Ld(end_row - 1, x) - Ld(end_row, x));
+    Lstep(end_row, x) = 0.5 * stepsize * (xpos - xneg + ypos);
   }
 
-  xpos = (c_row[0]+c_row[1])*(Ld_row[1]-Ld_row[0]);
-  ypos = (c_row[0]+c_row_p[0])*(Ld_row_p[0]-Ld_row[0]);
-  Lstep_row[0] = 0.5*stepsize*(xpos + ypos);
+  const int c_min_1 = Lstep.cols() - 1;
+  const int c_min_2 = Lstep.cols() - 2;
+  for (int i = 1; i < Lstep.rows() - 1; i++) {
+    float xpos = (c(i, 0) + c(i, 1)) * (Ld(i, 1) - Ld(i, 0));
+    float ypos = (c(i, 0) + c(i + 1, 0)) * (Ld(i + 1, 0) - Ld(i, 0));
+    float yneg = (c(i - 1, 0) + c(i, 0)) * (Ld(i, 0) - Ld(i - 1, 0));
+    Lstep(i, 0) = 0.5 * stepsize * (xpos + ypos - yneg);
 
-  x = Lstep.cols-1;
-  xneg = (c_row[x-1]+c_row[x])*(Ld_row[x]-Ld_row[x-1]);
-  ypos = (c_row[x]+c_row_p[x])*(Ld_row_p[x]-Ld_row[x]);
-  Lstep_row[x] = 0.5*stepsize*(-xneg + ypos);
-
-  // First and last columns
-  for (int i = 1; i < Lstep.rows-1; i++) {
-
-    const float* c_row = c.ptr<float>(i);
-    const float* c_row_m = c.ptr<float>(i-1);
-    const float* c_row_p = c.ptr<float>(i+1);
-    float* Ld_row = Ld.ptr<float>(i);
-    float* Ld_row_p = Ld.ptr<float>(i+1);
-    float* Ld_row_m = Ld.ptr<float>(i-1);
-    Lstep_row = Lstep.ptr<float>(i);
-
-    float xpos = (c_row[0]+c_row[1])*(Ld_row[1]-Ld_row[0]);
-    float ypos = (c_row[0]+c_row_p[0])*(Ld_row_p[0]-Ld_row[0]);
-    float yneg = (c_row_m[0]+c_row[0])*(Ld_row[0]-Ld_row_m[0]);
-    Lstep_row[0] = 0.5*stepsize*(xpos+ypos-yneg);
-
-    float xneg = (c_row[Lstep.cols-2]+c_row[Lstep.cols-1])*(Ld_row[Lstep.cols-1]-Ld_row[Lstep.cols-2]);
-    ypos = (c_row[Lstep.cols-1]+c_row_p[Lstep.cols-1])*(Ld_row_p[Lstep.cols-1]-Ld_row[Lstep.cols-1]);
-    yneg = (c_row_m[Lstep.cols-1]+c_row[Lstep.cols-1])*(Ld_row[Lstep.cols-1]-Ld_row_m[Lstep.cols-1]);
-    Lstep_row[Lstep.cols-1] = 0.5*stepsize*(-xneg+ypos-yneg);
+    const float xneg =
+        (c(i, c_min_2) + c(i, c_min_1)) * (Ld(i, c_min_1) - Ld(i, c_min_2));
+    ypos = (c(i, c_min_1) + c(i + 1, c_min_1)) *
+           (Ld(i + 1, c_min_1) - Ld(i, c_min_1));
+    yneg = (c(i - 1, c_min_1) + c(i, c_min_1)) *
+           (Ld(i, c_min_1) - Ld(i - 1, c_min_1));
+    Lstep(i, c_min_1) = 0.5 * stepsize * (-xneg + ypos - yneg);
   }
 
   // Ld = Ld + Lstep
-  for (int y = 0; y < Lstep.rows; y++) {
-    float* Ld_row = Ld.ptr<float>(y);
-    float* Lstep_row = Lstep.ptr<float>(y);
-    for (int x = 0; x < Lstep.cols; x++) {
-      Ld_row[x] = Ld_row[x] + Lstep_row[x];
+  Ld += Lstep;
+}
+
+/* ************************************************************************* */
+// I think OpenCV's inter area works by setting the size of the interpolation
+// kernel to be equal to the scaling factor.
+//
+// TODO: OpenCV is ~7x faster for this method when dimensions are odd. Maybe the
+// difference is only in using OpenMP (I tested it on a Mac). Should try to
+// improve the performance here.
+void halfsample_image(const RowMatrixXf& src, RowMatrixXf& dst) {
+  assert(src.rows() / 2 == dst.rows());
+  assert(src.cols() / 2 == dst.cols());
+
+  // Do the whole resampling in one pass by using neighboring values. First, we
+  // compute the borders.
+  const double x_kernel_size = static_cast<double>(src.cols()) / dst.cols();
+  const double y_kernel_size = static_cast<double>(src.rows()) / dst.rows();
+
+  // Do simple linear interpolation.
+  if (x_kernel_size == 2 && y_kernel_size == 2) {
+    for (int i = 0; i < dst.rows(); i++) {
+      for (int j = 0; j < dst.cols(); j++) {
+        dst(i, j) = src(2 * i, 2 * j) + src(2 * i + 1, 2 * j) +
+                    src(2 * i, 2 * j + 1) + src(2 * i + 1, 2 * j + 1);
+      }
     }
-  }
-}
-
-/* ************************************************************************* */
-void halfsample_image(const cv::Mat& src, cv::Mat& dst) {
-
-  // Make sure the destination image is of the right size
-  cv::resize(src, dst, dst.size(), 0, 0, cv::INTER_AREA);
-}
-
-/* ************************************************************************* */
-void compute_derivative_kernels(cv::OutputArray kx_, cv::OutputArray ky_,
-                                const size_t dx, const size_t dy, const size_t scale) {
-
-  const int ksize = 3 + 2*(scale-1);
-
-  // The usual Scharr kernel
-  if (scale == 1) {
-    cv::getDerivKernels(kx_, ky_, dx, dy, 0, true, CV_32F);
+    dst /= 4.0;
     return;
   }
 
-  kx_.create(ksize,1,CV_32F,-1,true);
-  ky_.create(ksize,1,CV_32F,-1,true);
-  cv::Mat kx = kx_.getMat();
-  cv::Mat ky = ky_.getMat();
+  const double x_kernel_clamped_size = static_cast<int>(ceil(x_kernel_size));
+  const double y_kernel_clamped_size = static_cast<int>(ceil(y_kernel_size));
 
-  float w = 10.0/3.0;
-  float norm = 1.0/(2.0*scale*(w+2.0));
+  // Set up precomputed factor matrices.
+  Eigen::RowVectorXf x_kernel_mul(x_kernel_clamped_size),
+      y_kernel_mul(y_kernel_clamped_size);
+  y_kernel_mul.setConstant(1.0);
 
-  for (int k = 0; k < 2; k++) {
-    cv::Mat* kernel = k == 0 ? &kx : &ky;
-    int order = k == 0 ? dx : dy;
-    float kerI[1000];
+  Eigen::RowVectorXf temp_row(src.cols());
+#ifdef AKAZE_USE_OPENMP
+#pragma omp parallel for firstprivate(temp_row, x_kernel_mul, y_kernel_mul)
+#endif
+  for (int i = 0; i < dst.rows(); i++) {
+    // Compute the row resize first.
+    const int y = static_cast<int>(y_kernel_size * i);
+    y_kernel_mul(0) = 1 - (y_kernel_size * i - y);
+    y_kernel_mul(y_kernel_clamped_size - 1) -=
+        y_kernel_mul.sum() - y_kernel_size;
 
-    for (int t = 0; t<ksize; t++)
-      kerI[t] = 0;
+    temp_row =
+        y_kernel_mul * src.block(y, 0, y_kernel_clamped_size, src.cols());
 
-    if (order == 0) {
-      kerI[0] = norm;
-      kerI[ksize/2] = w*norm;
-      kerI[ksize-1] = norm;
+    // For this row, compute the column-wise resize.
+    x_kernel_mul.setConstant(1.0);
+    for (int j = 0; j < dst.cols(); j++) {
+      const int x = static_cast<int>(x_kernel_size * j);
+      x_kernel_mul(0) = 1 - (x_kernel_size * j - x);
+      x_kernel_mul(x_kernel_clamped_size - 1) -=
+          x_kernel_mul.sum() - x_kernel_size;
+      dst(i, j) =
+          x_kernel_mul.dot(temp_row.segment(x, x_kernel_clamped_size));
     }
-    else if (order == 1) {
-      kerI[0] = -1;
-      kerI[ksize/2] = 0;
-      kerI[ksize-1] = 1;
-    }
-
-    cv::Mat temp(kernel->rows, kernel->cols, CV_32F, &kerI[0]);
-    temp.copyTo(*kernel);
   }
+
+  dst /= x_kernel_size * y_kernel_size;
 }
 
 /* ************************************************************************* */
-bool check_maximum_neighbourhood(const cv::Mat& img, int dsize, float value,
+bool check_maximum_neighbourhood(const RowMatrixXf& img, int dsize, float value,
                                  int row, int col, bool same_img) {
-
   bool response = true;
 
-  for (int i = row-dsize; i <= row+dsize; i++) {
-    for (int j = col-dsize; j <= col+dsize; j++) {
-      if (i >= 0 && i < img.rows && j >= 0 && j < img.cols) {
+  for (int i = row - dsize; i <= row + dsize; i++) {
+    for (int j = col - dsize; j <= col + dsize; j++) {
+      if (i >= 0 && i < img.rows() && j >= 0 && j < img.cols()) {
         if (same_img == true) {
           if (i != row || j != col) {
-            if ((*(img.ptr<float>(i)+j)) > value) {
+            if (img(i, j) > value) {
               response = false;
               return response;
             }
           }
-        }
-        else {
-          if ((*(img.ptr<float>(i)+j)) > value) {
+        } else {
+          if (img(i, j) > value) {
             response = false;
             return response;
           }
@@ -396,3 +312,5 @@ bool check_maximum_neighbourhood(const cv::Mat& img, int dsize, float value,
 
   return response;
 }
+
+}  // namespace libAKAZE
