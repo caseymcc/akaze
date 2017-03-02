@@ -20,17 +20,32 @@
  * @author Pablo F. Alcantarilla, Jesus Nuevo
  */
 
-#include "./lib/AKAZE.h"
+#include "commandLineHelper.h"
 
-// OpenCV
-#include <opencv2/imgproc/imgproc.hpp>
-#include <opencv2/highgui/highgui.hpp>
-#include <opencv2/features2d/features2d.hpp>
+#include <ctime>
 
+#include "lib/AKAZE.h"
+#include "lib/AKAZEConfig.h"
+#include "lib/utils.h"
+#include "timer/timer.hpp"
+
+#include "cimg/CImg.h"
+
+#ifdef AKAZE_USE_CUDA
+#include "./lib/AKAZE_cuda.h"
 #include <cuda_profiler_api.h>
+#endif //AKAZE_USE_CUDA
+
+#ifdef AKAZE_USE_OPENCL
+#include "./lib/OpenCLContext.h"
+#include "./lib/AKAZE_cl.h"
+#endif
 
 using namespace std;
-using namespace libAKAZECU;
+
+int featuresStandard(ProgramOptions &options, libAKAZE::Options &akaze_options);
+int featuresCuda(ProgramOptions &options, libAKAZE::Options &akaze_options);
+int featuresOpenCL(ProgramOptions &options, libAKAZE::Options &akaze_options);
 
 /* ************************************************************************* */
 /**
@@ -40,289 +55,251 @@ using namespace libAKAZECU;
  * @param img_path Path for the input image
  * @param kpts_path Path for the file where the keypoints where be stored
  */
-int parse_input_options(AKAZEOptions& options, std::string& img_path,
-                        std::string& kpts_path, int argc, char* argv[]);
+//int parse_input_options(libAKAZE::Options& options, std::string& img_path,
+//                        std::string& kpts_path, int argc, char* argv[]);
 
 /* ************************************************************************* */
-int main(int argc, char* argv[]) {
-  // Variables
-  AKAZEOptions options;
-  string img_path, kpts_path;
+int main(int argc, char* argv[])
+{
+    // Variables
+    ProgramOptions options;
+    libAKAZE::Options akaze_options;
+    std::string image_path, keypoints_path;
+    
+    int error;
 
-  // Variable for computation times.
-  double t1 = 0.0, t2 = 0.0, tdet = 0.0, tdesc = 0.0;
-
-  // Parse the input command line options
-  if (parse_input_options(options, img_path, kpts_path, argc, argv)) return -1;
-
-  if (options.verbosity) {
-    cout << "Check AKAZE options:" << endl;
-    cout << options << endl;
-  }
-
-  // Try to read the image and if necessary convert to grayscale.
-  cv::Mat img = cv::imread(img_path.c_str(), 0);
-  if (img.data == NULL) {
-    cerr << "Error: cannot load image from file:" << endl
-         << img_path << endl;
-    return -1;
-  }
-
-  // Convert the image to float to extract features
-  cv::Mat img_32;
-  img.convertTo(img_32, CV_32F, 1.0 / 255.0, 0);
-
-  // Don't forget to specify image dimensions in AKAZE's options
-  options.img_width = img.cols;
-  options.img_height = img.rows;
-
-  // Extract features
-  AKAZE evolution(options);
-  vector<cv::KeyPoint> kpts;
-
-  cudaProfilerStart();
-
-  t1 = cv::getTickCount();
-  evolution.Create_Nonlinear_Scale_Space(img_32);
-  evolution.Feature_Detection(kpts);
-  t2 = cv::getTickCount();
-  tdet = 1000.0 * (t2 - t1) / cv::getTickFrequency();
-
-  // Compute descriptors.
-  cv::Mat desc;
-  t1 = cv::getTickCount();
-  evolution.Compute_Descriptors(kpts, desc);
-  t2 = cv::getTickCount();
-  tdesc = 1000.0 * (t2 - t1) / cv::getTickFrequency();
-
-  for (int i=0; i<kpts.size(); ++i) {
-      cv::KeyPoint &pt = kpts[i];
-      if (pt.size < 0)
-          std::cout << pt.pt.y << " " << pt.pt.x << std::endl;
-  }
-
-  cudaProfilerStop();
-
-  std::vector<std::vector<cv::DMatch> > dmatches;
-  MatchDescriptors(desc, desc, dmatches);
-
-  // opencv bruteforce macher
-  std::vector<std::vector<cv::DMatch> > cv_matches;
-
-  cv::Ptr<cv::DescriptorMatcher> matcher_l1 =
-      cv::DescriptorMatcher::create("BruteForce-Hamming");
-  // cv::BFMatcher matcher(cv::NORM_HAMMING);
-
-  matcher_l1->knnMatch(desc, desc, cv_matches, 2);
-
-
-/*  vector<int> fst_errs;
-  vector<int> scd_errs;
-
-  for (int i = 0; i < dmatches.size(); ++i) {
-    if (dmatches[i][0].trainIdx != cv_matches[i][0].trainIdx ||
-        dmatches[i][0].queryIdx != cv_matches[i][0].queryIdx ||
-        dmatches[i][0].distance != cv_matches[i][0].distance) {
-      fst_errs.push_back(i);
-
-      std::cout << "cuda " << dmatches[i][0].trainIdx << " "
-                << dmatches[i][0].queryIdx << " " << dmatches[i][0].distance
-                << " " << dmatches[i][1].trainIdx << " "
-                << dmatches[i][1].queryIdx << " " << dmatches[i][1].distance
-                << "\n"
-                << "cv " << cv_matches[i][0].trainIdx << " "
-                << cv_matches[i][0].queryIdx << " " << cv_matches[i][0].distance
-                << " " << cv_matches[i][1].trainIdx << " "
-                << cv_matches[i][1].queryIdx << " " << cv_matches[i][1].distance
-                << " first \n";
-    }
-    else if( dmatches[i][1].trainIdx != cv_matches[i][1].trainIdx ||
-            dmatches[i][1].queryIdx != cv_matches[i][1].queryIdx ||
-            dmatches[i][1].distance != cv_matches[i][1].distance)
+    // Parse the input command line options
+    if((error=parse_input_options(options, akaze_options, argc, argv)))
     {
-        scd_errs.push_back(i);
-        std::cout << "cuda " << dmatches[i][0].trainIdx << " "
-                  << dmatches[i][0].queryIdx << " " << dmatches[i][0].distance
-                  << " " << dmatches[i][1].trainIdx << " "
-                  << dmatches[i][1].queryIdx << " " << dmatches[i][1].distance
-                  << "\n"
-                  << "cv " << cv_matches[i][0].trainIdx << " "
-                  << cv_matches[i][0].queryIdx << " " << cv_matches[i][0].distance
-                  << " " << cv_matches[i][1].trainIdx << " "
-                  << cv_matches[i][1].queryIdx << " " << cv_matches[i][1].distance
-                  << " second \n";
+        if(error == -1)
+            show_input_options_help(0);
+
+        getchar();
+        return -1;
     }
-  }
 
-  int fst_count = fst_errs.size();
-  int scd_count = scd_errs.size();
+    if(akaze_options.verbosity)
+    {
+        cout<<"Check AKAZE options:"<<endl;
+        cout<<akaze_options<<endl;
+    }
 
-  std::cout << "Total num of errors best " << fst_count << " errors second " << scd_count << "\n" << std::endl;
+    if(options.requestDevices)
+    {
+        if(akaze_options.type==libAKAZE::Options::Cuda)
+        {
+            cerr<<"Error: --devices not supported for Cuda processing"<<endl;
+            getchar();
+            return -1;
+        }
+        else if(akaze_options.type==libAKAZE::Options::OpenCL)
+        {
+#ifdef AKAZE_USE_OPENCL
+            std::vector<libAKAZE::cl::ProcessingDevice> devices=libAKAZE::cl::getDevices();
 
-  for (int j = 0; j < desc.cols; ++j) {
-    std::cout << static_cast<int>(
-                     desc.at<uchar>(dmatches[fst_errs[fst_count-1]][0].trainIdx, j))
-              << "," << static_cast<int>(desc.at<uchar>(
-                            dmatches[fst_errs[fst_count-1]][0].queryIdx, j)) << " ";
-  }
-  std::cout << "\n";*/
+            for(libAKAZE::cl::ProcessingDevice &device:devices)
+            {
+                cout<<"Device: "<<device.name<<" ("<<device.platform<<", "<<device.vendor<<")"<<endl;
+                cout<<"  Type: "<<((device.type==libAKAZE::cl::ProcessingDevice::GPU)?"GPU":"CPU")<<endl;
+                cout<<"  Version: "<<device.version<<endl;
+            }
 
-  if (true) {
-    // Summarize the computation times.
-    evolution.Show_Computation_Times();
+            getchar();
+            return 0;
+#else
+            cerr<<"Error: OpenCL not supported in build"<<endl;
+            return -1;
+#endif // AKAZE_USE_OPENCL
+        }
+        else
+        {
+            cerr<<"Error: --devices not supported for Standard processing"<<endl;
+            getchar();
+            return -1;
+        }
+    }
 
-    cout << "Number of points: " << kpts.size() << endl;
-    cout << "Time Detector: " << tdet << " ms" << endl;
-    cout << "Time Descriptor: " << tdesc << " ms" << endl;
+    // Try to read the image and if necessary convert to grayscale.
+    int value;
 
-    cv::Mat img_rgb = cv::Mat(cv::Size(img.cols, img.rows), CV_8UC3);
-    cvtColor(img,img_rgb, cv::COLOR_GRAY2BGR);
-    draw_keypoints(img_rgb, kpts);
+    switch(akaze_options.type)
+    {
+    case libAKAZE::Options::Standard:
+        value=featuresStandard(options, akaze_options);
+        break;
+//    case libAKAZE::Options::Cuda:
+//        break;
+    case libAKAZE::Options::OpenCL:
+        value=featuresOpenCL(options, akaze_options);
+        break;
+    }
 
-    cv::namedWindow("A-KAZE", cv::WINDOW_AUTOSIZE);
-    cv::imshow("A-KAZE", img_rgb);
-    cv::waitKey(0);
-  }
-
-  // Save keypoints in ASCII format
-  if (!kpts_path.empty()) save_keypoints(kpts_path, kpts, desc, true);
-
-  //  }
+    return value;
 }
 
-/* ************************************************************************* */
-int parse_input_options(AKAZEOptions& options, std::string& img_path,
-                        std::string& kpts_path, int argc, char* argv[]) {
-  // If there is only one argument return
-  if (argc == 1) {
-    show_input_options_help(0);
+int featuresStandard(ProgramOptions &options, libAKAZE::Options &akaze_options)
+{
+    // Try to read the image and if necessary convert to grayscale. CImg will
+    // throw an error and crash if the image could not be read.
+    cimg_library::CImg<float> img(options.image_path.c_str());
+    RowMatrixXf img_32;
+    timer::Timer timer;
+    double totalTime;
+
+    ConvertCImgToEigen(img, img_32);
+    img_32/=255.0;
+
+    // Don't forget to specify image dimensions in AKAZE's options.
+    akaze_options.img_width=img_32.cols();
+    akaze_options.img_height=img_32.rows();
+
+    // Extract features.
+    std::vector<libAKAZE::Keypoint> kpts;
+    libAKAZE::AKAZE evolution(akaze_options);
+    libAKAZE::Descriptors desc;
+
+    timer.reset();
+    evolution.Create_Nonlinear_Scale_Space(img_32);
+    evolution.Feature_Detection(kpts);
+
+    // Compute descriptors.
+    evolution.Compute_Descriptors(kpts, desc);
+    totalTime=timer.elapsedMs();
+
+    // Summarize the computation times.
+    evolution.Save_Scale_Space();
+    std::cout<<"Number of points: "<<kpts.size()<<std::endl;
+    evolution.Show_Computation_Times();
+    std::cout<<"Total Time: "<<totalTime<<std::endl;
+
+    getchar();
+
+    // Save keypoints in ASCII format.
+    if(akaze_options.descriptor < libAKAZE::MLDB_UPRIGHT)
+    {
+        save_keypoints(options.keypoints_path, kpts, desc.float_descriptor, true);
+    }
+    else
+    {
+//            save_keypoints(options.keypoints_path, kpts, desc.binary_descriptor, true);
+        save_keypoints_json(options.keypoints_path, kpts, desc.binary_descriptor, true);
+    }
+
+    // Convert the input image to RGB.
+    cimg_library::CImg<float> rgb_image=
+        img.get_resize(img.width(), img.height(), img.depth(), 3);
+//    draw_keypoints(rgb_image, kpts);
+    draw_keypoints_vector(rgb_image, kpts);
+    rgb_image.save("../output/detected_features.jpg");
+
+    return 0;
+}
+
+int featuresCuda(ProgramOptions &options, libAKAZE::Options &akaze_options)
+{
     return -1;
-  }
-  // Set the options from the command line
-  else if (argc >= 2) {
-    options = AKAZEOptions();
-    kpts_path = "./keypoints.txt";
+}
 
-    if (!strcmp(argv[1], "--help")) {
-      show_input_options_help(0);
-      return -1;
+int featuresOpenCL(ProgramOptions &options, libAKAZE::Options &akaze_options)
+{
+#ifdef AKAZE_USE_OPENCL
+    cimg_library::CImg<float> img(options.image_path.c_str());
+    RowMatrixXf img_32;
+    timer::Timer timer;
+    double totalTime;
+
+    ConvertCImgToEigen(img, img_32);
+    img_32/=255.0;
+
+    akaze_options.img_width=img_32.cols();
+    akaze_options.img_height=img_32.rows();
+    
+    ::cl::Context openClContext;
+
+    if(!options.device.empty())
+    {
+        if(!options.platform.empty())
+            openClContext=libAKAZE::cl::openDevice(options.platform, options.device);
+        else
+            openClContext=libAKAZE::cl::openDevice(options.device);
+    }
+    else
+        openClContext=libAKAZE::cl::openDevice();
+
+    if(openClContext() == nullptr)
+        return 1;
+
+    ::cl::CommandQueue commandQueue(openClContext);
+
+    vector<libAKAZE::Keypoint> kpts;
+    libAKAZE::cl::AKAZE evolution(openClContext(), commandQueue(), akaze_options);
+    libAKAZE::Descriptors desc;
+
+    evolution.initOpenCL(); //gets some items loaded early
+
+    timer.reset();
+    if(!options.scale_space_directory.empty()&&!options.save_scale_space)
+        evolution.Load_Nonlinear_Scale_Space(options.scale_space_directory);
+    else
+    {
+        evolution.Create_Nonlinear_Scale_Space(img_32);
+
+        if(options.save_scale_space)
+            evolution.Save_Nonlinear_Scale_Space(options.scale_space_directory);
     }
 
-    img_path = argv[1];
+    evolution.Feature_Detection(kpts);
+//    if(!options.det_hessian_response_directory.empty()&&!options.save_det_hessian_response)
+//    {
+//        evolution.Load_Derivatives(options.det_hessian_response_directory);
+//        evolution.Load_Determinant_Hessian_Response(options.det_hessian_response_directory);
+//    }
+//    else
+//    {
+//        evolution.Compute_Determinant_Hessian_Response();
+//
+//        if(options.save_det_hessian_response)
+//        {
+//            evolution.Save_Derivatives(options.det_hessian_response_directory);
+//            evolution.Save_Determinant_Hessian_Response(options.det_hessian_response_directory);
+//        }
+//    }
+//
+//    if(!options.keypoints_data_path.empty() && !options.save_keypoints)
+//    {
+//        evolution.Load_Keypoints(options.keypoints_data_path);
+//    }
+//    else
+//    {
+////        evolution.Find_Scale_Space_Extrema(kpts);
+//        evolution.Find_Scale_Space_Extrema();
+//
+//        if(options.save_keypoints)
+//            evolution.Save_Keypoints(options.keypoints_data_path);
+//    }
 
-    for (int i = 2; i < argc; i++) {
-      if (!strcmp(argv[i], "--soffset")) {
-        i = i + 1;
-        if (i >= argc) {
-          cerr << "Error introducing input options!!" << endl;
-          return -1;
-        } else {
-          options.soffset = atof(argv[i]);
-        }
-      } else if (!strcmp(argv[i], "--omax")) {
-        i = i + 1;
-        if (i >= argc) {
-          cerr << "Error introducing input options!!" << endl;
-          return -1;
-        } else {
-          options.omax = atof(argv[i]);
-        }
-      } else if (!strcmp(argv[i], "--dthreshold")) {
-        i = i + 1;
-        if (i >= argc) {
-          cerr << "Error introducing input options!!" << endl;
-          return -1;
-        } else {
-          options.dthreshold = atof(argv[i]);
-        }
-      } else if (!strcmp(argv[i], "--sderivatives")) {
-        i = i + 1;
-        if (i >= argc) {
-          cerr << "Error introducing input options!!" << endl;
-          return -1;
-        } else {
-          options.sderivatives = atof(argv[i]);
-        }
-      } else if (!strcmp(argv[i], "--nsublevels")) {
-        i = i + 1;
-        if (i >= argc) {
-          cerr << "Error introducing input options!!" << endl;
-          return -1;
-        } else
-          options.nsublevels = atoi(argv[i]);
-      } else if (!strcmp(argv[i], "--diffusivity")) {
-        i = i + 1;
-        if (i >= argc) {
-          cerr << "Error introducing input options!!" << endl;
-          return -1;
-        } else
-          options.diffusivity = DIFFUSIVITY_TYPE(atoi(argv[i]));
-      } else if (!strcmp(argv[i], "--descriptor")) {
-        i = i + 1;
-        if (i >= argc) {
-          cerr << "Error introducing input options!!" << endl;
-          return -1;
-        } else {
-          options.descriptor = DESCRIPTOR_TYPE(atoi(argv[i]));
+    evolution.Compute_Descriptors(desc);
 
-          if (options.descriptor < 0 || options.descriptor > MLDB) {
-            options.descriptor = MLDB;
-          }
-        }
-      } else if (!strcmp(argv[i], "--descriptor_channels")) {
-        i = i + 1;
-        if (i >= argc) {
-          cerr << "Error introducing input options!!" << endl;
-          return -1;
-        } else {
-          options.descriptor_channels = atoi(argv[i]);
+    totalTime=timer.elapsedMs();
 
-          if (options.descriptor_channels <= 0 ||
-              options.descriptor_channels > 3) {
-            options.descriptor_channels = 3;
-          }
-        }
-      } else if (!strcmp(argv[i], "--descriptor_size")) {
-        i = i + 1;
-        if (i >= argc) {
-          cerr << "Error introducing input options!!" << endl;
-          return -1;
-        } else {
-          options.descriptor_size = atoi(argv[i]);
+    evolution.getKeypoints(kpts);
 
-          if (options.descriptor_size < 0) {
-            options.descriptor_size = 0;
-          }
-        }
-      } else if (!strcmp(argv[i], "--save_scale_space")) {
-        i = i + 1;
-        if (i >= argc) {
-          cerr << "Error introducing input options!!" << endl;
-          return -1;
-        } else {
-          options.save_scale_space = (bool)atoi(argv[i]);
-        }
-      } else if (!strcmp(argv[i], "--show_results")) {
-        i = i + 1;
-        if (i >= argc) {
-          cerr << "Error introducing input options!!" << endl;
-          return -1;
-        } else {
-          // options.show_results = (bool)atoi(argv[i]);
-        }
-      } else if (!strcmp(argv[i], "--verbose")) {
-        options.verbosity = true;
-      } else if (!strcmp(argv[i], "--output")) {
-        options.save_keypoints = true;
-        i = i + 1;
-        if (i >= argc) {
-          cerr << "Error introducing input options!!" << endl;
-          return -1;
-        } else
-          kpts_path = argv[i];
-      }
-    }
-  }
+    std::cout<<"Number of points: "<<kpts.size()<<std::endl;
+    evolution.Show_Computation_Times();
+    std::cout<<"Total Time: "<<totalTime<<std::endl;
 
-  return 0;
+    getchar();
+
+    std::string fileName="../output/keypoints_cl.txt";
+    save_keypoints_json(fileName, kpts, desc.binary_descriptor, true);
+
+    cimg_library::CImg<float> rgb_image=
+        img.get_resize(img.width(), img.height(), img.depth(), 3);
+    draw_keypoints_vector(rgb_image, kpts);
+    rgb_image.save("../output/detected_features_cl.jpg");
+
+    return 0;
+#else //AKAZE_USE_OPENCL
+    return -1;
+#endif //AKAZE_USE_OPENCL
 }

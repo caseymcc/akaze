@@ -22,99 +22,305 @@
 
 #include "utils.h"
 
-// OpenCV
-#include <opencv2/calib3d/calib3d.hpp>
-#include <opencv2/imgproc/imgproc.hpp>
+#include <Eigen/Core>
+#include <Eigen/Geometry>
 
 // System
+#include <algorithm>
 #include <fstream>
+#include <string>
+#include <utility>
+#include <vector>
 
-using namespace std;
+#ifdef AKAZE_USE_JSON
+#include "rapidjson/document.h"
+#include "rapidjson/filewritestream.h"
+#include "rapidjson/filereadstream.h"
+#include "rapidjson/writer.h"
+#include "rapidjson/prettywriter.h"
+#endif //AKAZE_USE_JSON
 
 /* ************************************************************************* */
-void compute_min_32F(const cv::Mat &src, float& value) {
 
-  float aux = 1000.0;
-  for (int i = 0; i < src.rows; i++) {
-    for (int j = 0; j < src.cols; j++) {
-      if (src.at<float>(i,j) < aux)
-        aux = src.at<float>(i,j);
+// Converts to a CImg type and adjusts the scale for image displaying.
+void ConvertEigenToCImg(const RowMatrixXf& mat,
+                        cimg_library::CImg<float>& cimg) {
+  cimg.resize(mat.cols(), mat.rows());
+  const float min_coeff = mat.minCoeff();
+  const float max_coeff = mat.maxCoeff();
+  for (int y = 0; y < mat.rows(); y++) {
+    for (int x = 0; x < mat.cols(); x++) {
+      cimg(x, y) = (mat(y, x) - min_coeff) / (max_coeff - min_coeff);
     }
   }
-  value = aux;
 }
 
 /* ************************************************************************* */
-void compute_max_32F(const cv::Mat &src, float& value) {
 
-  float aux = 0.0;
-  for (int i = 0; i < src.rows; i++) {
-    for (int j = 0; j < src.cols; j++) {
-      if (src.at<float>(i,j) > aux)
-        aux = src.at<float>(i,j);
+void ConvertCImgToEigen(const cimg_library::CImg<float>& image,
+                        RowMatrixXf& eigen_image) {
+  cimg_library::CImg<float> grayscale_image;
+
+  // Convert to grayscale if needed.
+  if (image.spectrum() == 1) {
+    grayscale_image = image;
+  } else {
+    grayscale_image = image.get_RGBtoYCbCr().channel(0);
+  }
+  // Copy the grayscale image to the eigen matrix.
+  eigen_image = Eigen::Map<const Eigen::Matrix<
+      float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> >(
+      grayscale_image.data(),
+      grayscale_image.height(),
+      grayscale_image.width());
+}
+
+/* ************************************************************************* */
+void saveMatrixAsImage(const RowMatrixXf& mat, std::string fileName)
+{
+    cimg_library::CImg<float> image;
+    ConvertEigenToCImg(mat, image);
+    std::string outputFile;
+
+    image.normalize(0, 255);
+    image.save(fileName.c_str());
+}
+
+/* ************************************************************************* */
+void saveMatrixAsCsvFile(const RowMatrixXf& mat, std::string fileName)
+{
+	std::ofstream file(fileName);
+	float value;
+
+	file<<std::setprecision(4);
+	for(int rows=0; rows<mat.rows(); rows++)
+	{
+		file<<mat(rows, 0);
+		for(int cols=1; cols<mat.cols(); cols++)
+		{
+			file<<", "<<mat(rows, cols);
+		}
+		file<<"\n";
+	}
+}
+
+/* ************************************************************************* */
+
+// Build a simple lookup table for the hamming distance of xor-ing two 8-bit
+// numbers.
+int HammingDistance(const libAKAZE::BinaryVectorX& desc1,
+                    const libAKAZE::BinaryVectorX& desc2) {
+  static const unsigned char pop_count_table[] = {
+    0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 1, 2, 2, 3, 2, 3, 3, 4, 2,
+    3, 3, 4, 3, 4, 4, 5, 1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5, 2, 3,
+    3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3,
+    4, 3, 4, 4, 5, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 2, 3, 3, 4,
+    3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5,
+    6, 6, 7, 1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5, 2, 3, 3, 4, 3, 4,
+    4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5,
+    6, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 2, 3, 3, 4, 3, 4, 4, 5,
+    3, 4, 4, 5, 4, 5, 5, 6, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 3,
+    4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 4, 5, 5, 6, 5, 6, 6, 7, 5, 6,
+    6, 7, 6, 7, 7, 8
+  };
+
+  int result = 0;
+  const unsigned char* char1 = desc1.data();
+  const unsigned char* char2 = desc2.data();
+  const int num_bytes = desc1.size() / (8 * sizeof(unsigned char));
+  for (size_t i = 0; i < num_bytes; i++) {
+    result += pop_count_table[char1[i] ^ char2[i]];
+  }
+
+  return result;
+}
+
+void match_features(const std::vector<libAKAZE::Vector64f>& desc1,
+                    const std::vector<libAKAZE::Vector64f>& desc2,
+                    const double ratio,
+                    std::vector<std::pair<int, int> >& matches) {
+  // Find all desc1 -> desc2 matches.
+  typedef std::pair<float, int> MatchDistance;
+
+  std::vector<std::vector<MatchDistance> > match_distances(desc1.size());
+  #ifdef AKAZE_USE_OPENMP
+  #pragma omp parallel for
+  #endif
+  for (int i = 0; i < desc1.size(); i++) {
+    match_distances[i].resize(desc2.size());
+    for (int j = 0; j < desc2.size(); j++) {
+      const float distance = (desc1[i] - desc2[j]).squaredNorm();
+      match_distances[i][j] = std::make_pair(distance, j);
     }
   }
-  value = aux;
+
+  // Only save the matches that pass the lowes ratio test.
+  matches.reserve(desc1.size());
+  for (int i = 0; i < match_distances.size(); i++) {
+    // Get the top 2 matches.
+    std::partial_sort(match_distances[i].begin(),
+                      match_distances[i].begin() + 2,
+                      match_distances[i].end());
+    if (match_distances[i][0].first / match_distances[i][1].first < ratio) {
+      matches.push_back(std::make_pair(i, match_distances[i][0].second));
+    }
+  }
+}
+
+void match_features(const std::vector<libAKAZE::BinaryVectorX>& desc1,
+                    const std::vector<libAKAZE::BinaryVectorX>& desc2,
+                    const double ratio,
+                    std::vector<std::pair<int, int> >& matches) {
+  // Find all desc1 -> desc2 matches.
+  typedef std::pair<int, int> MatchDistance;
+
+  std::vector<std::vector<MatchDistance> > match_distances(desc1.size());
+#ifdef AKAZE_USE_OPENMP
+#pragma omp parallel for
+#endif
+  for (int i = 0; i < desc1.size(); i++) {
+    match_distances[i].resize(desc2.size());
+    for (int j = 0; j < desc2.size(); j++) {
+      const int distance = HammingDistance(desc1[i], desc2[j]);
+      match_distances[i][j] = std::make_pair(distance, j);
+    }
+  }
+
+  // Only save the matches that pass the lowes ratio test.
+  matches.reserve(desc1.size());
+  for (int i = 0; i < match_distances.size(); i++) {
+    // Get the top 2 matches.
+    std::partial_sort(match_distances[i].begin(),
+                      match_distances[i].begin() + 2,
+                      match_distances[i].end());
+    if (static_cast<double>(match_distances[i][0].first) /
+            match_distances[i][1].first <
+        ratio) {
+      matches.push_back(std::make_pair(i, match_distances[i][0].second));
+    }
+  }
+}
+
+void compute_inliers_homography(
+    const std::vector<libAKAZE::Keypoint>& kpts1,
+    const std::vector<libAKAZE::Keypoint>& kpts2,
+    const std::vector<std::pair<int, int> >& matches,
+    std::vector<std::pair<int, int> >& inliers,
+    const Eigen::Matrix3f& H,
+    float min_error) {
+  inliers.reserve(matches.size());
+  for (int i = 0; i < matches.size(); i++) {
+    const Eigen::Vector3f& kpt1 = kpts1[matches[i].first].pt.homogeneous();
+    const Eigen::Vector3f& kpt2 = kpts2[matches[i].second].pt.homogeneous();
+    const Eigen::Vector3f projection = H * kpt1;
+    if ((projection - kpt2).norm() < min_error) {
+      inliers.push_back(matches[i]);
+    }
+  }
 }
 
 /* ************************************************************************* */
-void convert_scale(cv::Mat& src) {
-
-  float min_val = 0, max_val = 0;
-  compute_min_32F(src,min_val);
-  src = src - min_val;
-  compute_max_32F(src,max_val);
-  src = src / max_val;
-}
-
-/* ************************************************************************* */
-void copy_and_convert_scale(const cv::Mat &src, cv::Mat dst) {
-
-  float min_val = 0, max_val = 0;
-  src.copyTo(dst);
-  compute_min_32F(dst,min_val);
-  dst = dst - min_val;
-  compute_max_32F(dst,max_val);
-  dst = dst / max_val;
-}
-
-/* ************************************************************************* */
-void draw_keypoints(cv::Mat& img, const std::vector<cv::KeyPoint>& kpts) {
-
+void draw_keypoints(cimg_library::CImg<float>& image,
+                    const std::vector<libAKAZE::Keypoint>& kpts) {
   int x = 0, y = 0;
   float radius = 0.0;
 
   for (size_t i = 0; i < kpts.size(); i++) {
-    x = (int)(kpts[i].pt.x+.5);
-    y = (int)(kpts[i].pt.y+.5);
-    radius = kpts[i].size/2.0;
-    cv::circle(img, cv::Point(x,y), radius*2.50, cv::Scalar(0,255,0), 1);
-    cv::circle(img, cv::Point(x,y), 1.0, cv::Scalar(0,0,255), -1);
+    x = (int)(kpts[i].pt.x() + .5);
+    y = (int)(kpts[i].pt.y() + .5);
+    radius = kpts[i].size / 2.0;
+    float color1[3] = {0, 255, 0};
+    float color2[3] = {0, 0, 255};
+    image.draw_circle(x, y, radius * 2.5, color1, 1, 0L);
+    image.draw_circle(x, y, 1.0, color2);
+  }
+}
+
+void draw_keypoints_vector(cimg_library::CImg<float>& image,
+    const std::vector<libAKAZE::Keypoint>& kpts)
+{
+    int x=0, y=0;
+    float radius=0.0;
+
+    for(size_t i=0; i < kpts.size(); i++)
+    {
+        x=(int)(kpts[i].pt.x()+.5);
+        y=(int)(kpts[i].pt.y()+.5);
+        radius=kpts[i].size/2.0;
+        float green[3]={0, 255, 0};
+        float blue[3]={0, 0, 255};
+        float red[3]={255, 0, 0};
+        float yellow[3]={255, 255, 0};
+        float purple[3]={255, 0, 255};
+
+        float angle=kpts[i].angle;
+
+        int endX=2.5*radius*cos(angle)+x;
+        int endY=2.5*radius*sin(angle)+y;
+        
+        image.draw_arrow(x, y, endX, endY, green);
+#ifdef TRACK_REMOVED
+        if(kpts[i].removed == 0)
+            image.draw_circle(x, y, 1.0, blue);
+        else if(kpts[i].removed==1)
+            image.draw_circle(x, y, 1.0, red);
+        else if(kpts[i].removed==2)
+            image.draw_circle(x, y, 1.0, yellow);
+        else if(kpts[i].removed==3)
+            image.draw_circle(x, y, 1.0, purple);
+#else //TRACK_REMOVED
+        image.draw_circle(x, y, 1.0, blue);
+#endif //TRACK_REMOVED
+    }
+}
+
+void draw_matches(cimg_library::CImg<float>& image1,
+                  cimg_library::CImg<float>& image2,
+                  const std::vector<libAKAZE::Keypoint>& kpts1,
+                  const std::vector<libAKAZE::Keypoint>& kpts2,
+                  const std::vector<std::pair<int, int> >& matches,
+                  cimg_library::CImg<float>& matched_image) {
+  matched_image = image1;
+  matched_image.append(image2);
+  for (int i = 0; i < matches.size(); i++) {
+    float color[3] = {255, 0, 0};
+    const Eigen::Vector2f& pt1 = kpts1[matches[i].first].pt;
+    const Eigen::Vector2f& pt2 = kpts2[matches[i].second].pt;
+    matched_image.draw_line(pt1.x(),
+                            pt1.y(),
+                            pt2.x() + image1.width(),
+                            pt2.y(),
+                            color);
   }
 }
 
 /* ************************************************************************* */
-int save_keypoints(const string& outFile, const std::vector<cv::KeyPoint>& kpts,
-                   const cv::Mat& desc, bool save_desc) {
+int save_keypoints(const std::string& outFile,
+                   const std::vector<libAKAZE::Keypoint>& kpts,
+                   const std::vector<libAKAZE::Vector64f>& desc,
+                   bool save_desc) {
+  if (kpts.size() == 0) {
+    std::cerr << "No keypoints exist." << std::endl;
+    return -1;
+  }
 
   int nkpts = 0, dsize = 0;
   float sc = 0.0;
 
   nkpts = (int)(kpts.size());
-  dsize = (int)(desc.cols);
+  dsize = (int)(desc[0].size());
 
-  ofstream ipfile(outFile.c_str());
+  std::ofstream ipfile(outFile.c_str());
 
   if (!ipfile) {
-    cerr << "Couldn't open file '" << outFile << "'!" << endl;
+    std::cerr << "Couldn't open file '" << outFile << "'!" << std::endl;
     return -1;
   }
 
   if (!save_desc) {
-    ipfile << 1 << endl << nkpts << endl;
-  }
-  else {
-    ipfile << dsize << endl << nkpts << endl;
+    ipfile << 1 << std::endl << nkpts << std::endl;
+  } else {
+    ipfile << dsize << std::endl << nkpts << std::endl;
   }
 
   // Save interest point with descriptor in the format of Krystian Mikolajczyk
@@ -122,27 +328,20 @@ int save_keypoints(const string& outFile, const std::vector<cv::KeyPoint>& kpts,
   for (int i = 0; i < nkpts; i++) {
     // Radius of the keypoint
     sc = (kpts[i].size);
-    sc*=sc;
+    sc *= sc;
 
-    ipfile  << kpts[i].pt.x /* x-location of the interest point */
-            << " " << kpts[i].pt.y /* y-location of the interest point */
-            << " " << 1.0/sc /* 1/r^2 */
-            << " " << 0.0
-            << " " << 1.0/sc; /* 1/r^2 */
+    ipfile << kpts[i].pt.x()        /* x-location of the interest point */
+           << " " << kpts[i].pt.y() /* y-location of the interest point */
+           << " " << 1.0 / sc     /* 1/r^2 */
+           << " " << 0.0 << " " << 1.0 / sc; /* 1/r^2 */
 
     // Here comes the descriptor
-    for( int j = 0; j < dsize; j++) {
-      if (desc.type() == 0) {
-        ipfile << " " << (int)(desc.at<unsigned char>(i,j));
-      }
-      else {
-        ipfile << " " << (desc.at<float>(i,j));
-      }
+    for (int j = 0; j < dsize; j++) {
+      ipfile << " " << desc[i](j);
     }
 
-    ipfile << endl;
+    ipfile << std::endl;
   }
-
 
   // Close the txt file
   ipfile.close();
@@ -150,194 +349,133 @@ int save_keypoints(const string& outFile, const std::vector<cv::KeyPoint>& kpts,
   return 0;
 }
 
-/* ************************************************************************* */
-void matches2points_nndr(const std::vector<cv::KeyPoint>& train,
-                         const std::vector<cv::KeyPoint>& query,
-                         const std::vector<std::vector<cv::DMatch> >& matches,
-                         std::vector<cv::Point2f>& pmatches, float nndr) {
-
-  float dist1 = 0.0, dist2 = 0.0;
-  for (size_t i = 0; i < matches.size(); i++) {
-    cv::DMatch dmatch = matches[i][0];
-    dist1 = matches[i][0].distance;
-    dist2 = matches[i][1].distance;
-
-    if (dist1 < nndr*dist2) {
-      pmatches.push_back(train[dmatch.queryIdx].pt);
-      pmatches.push_back(query[dmatch.trainIdx].pt);
-    }
+int save_keypoints(const std::string& outFile,
+                   const std::vector<libAKAZE::Keypoint>& kpts,
+                   const std::vector<libAKAZE::BinaryVectorX>& desc,
+                   bool save_desc) {
+  if (kpts.size() == 0) {
+    std::cerr << "No keypoints exist." << std::endl;
+    return -1;
   }
+
+  int nkpts = 0, dsize = 0;
+  float sc = 0.0;
+
+  nkpts = (int)(kpts.size());
+  dsize = (int)(desc[0].size());
+
+  std::ofstream ipfile(outFile.c_str());
+
+  if (!ipfile) {
+    std::cerr << "Couldn't open file '" << outFile << "'!" << std::endl;
+    return -1;
+  }
+
+  if (!save_desc) {
+    ipfile << 1 << std::endl << nkpts << std::endl;
+  } else {
+    ipfile << dsize << std::endl << nkpts << std::endl;
+  }
+
+  // Save interest point with descriptor in the format of Krystian Mikolajczyk
+  // for reasons of comparison with other descriptors
+  for (int i = 0; i < nkpts; i++) {
+    // Radius of the keypoint
+    sc = (kpts[i].size);
+    sc *= sc;
+
+    ipfile << kpts[i].pt.x()        /* x-location of the interest point */
+           << " " << kpts[i].pt.y() /* y-location of the interest point */
+           << " " << 1.0 / sc     /* 1/r^2 */
+           << " " << 0.0 << " " << 1.0 / sc; /* 1/r^2 */
+
+    // Here comes the descriptor
+    for (int j = 0; j < dsize; j++) {
+      ipfile << " " << (int)(desc[i](j));
+    }
+
+    ipfile << std::endl;
+  }
+
+  // Close the txt file
+  ipfile.close();
+
+  return 0;
 }
 
-/* ************************************************************************* */
-void compute_inliers_ransac(const std::vector<cv::Point2f>& matches,
-                            std::vector<cv::Point2f>& inliers,
-                            float error, bool use_fund) {
-
-  vector<cv::Point2f> points1, points2;
-  cv::Mat H = cv::Mat::zeros(3,3,CV_32F);
-  int npoints = matches.size()/2;
-  cv::Mat status = cv::Mat::zeros(npoints,1,CV_8UC1);
-
-  for (size_t i = 0; i < matches.size(); i+=2) {
-    points1.push_back(matches[i]);
-    points2.push_back(matches[i+1]);
-  }
-
-  if (npoints > 8) {
-    if (use_fund == true)
-      H = cv::findFundamentalMat(points1,points2,cv::FM_RANSAC,error,0.99,status);
-    else
-      H = cv::findHomography(points1,points2,cv::RANSAC,error,status);
-
-    for (int i = 0; i < npoints; i++) {
-      if (status.at<unsigned char>(i) == 1) {
-        inliers.push_back(points1[i]);
-        inliers.push_back(points2[i]);
-      }
+#ifdef AKAZE_USE_JSON
+int save_keypoints_json(const std::string &outFile,
+    const std::vector<libAKAZE::Keypoint> &keypoints,
+    const std::vector<libAKAZE::BinaryVectorX> &desc,
+    bool save_desc)
+{
+    if(keypoints.size()==0)
+    {
+        std::cerr<<"No keypoints exist."<<std::endl;
+        return -1;
     }
-  }
-}
 
-/* ************************************************************************* */
-void compute_inliers_homography(const std::vector<cv::Point2f>& matches,
-                                std::vector<cv::Point2f>& inliers, const cv::Mat& H,
-                                float min_error) {
+    FILE *jsonFile=fopen(outFile.c_str(), "wb");
 
-  float h11 = 0.0, h12 = 0.0, h13 = 0.0;
-  float h21 = 0.0, h22 = 0.0, h23 = 0.0;
-  float h31 = 0.0, h32 = 0.0, h33 = 0.0;
-  float x1 = 0.0, y1 = 0.0;
-  float x2 = 0.0, y2 = 0.0;
-  float x2m = 0.0, y2m = 0.0;
-  float dist = 0.0, s = 0.0;
+    if(jsonFile==NULL)
+        return -1;
 
-  h11 = H.at<float>(0,0);
-  h12 = H.at<float>(0,1);
-  h13 = H.at<float>(0,2);
-  h21 = H.at<float>(1,0);
-  h22 = H.at<float>(1,1);
-  h23 = H.at<float>(1,2);
-  h31 = H.at<float>(2,0);
-  h32 = H.at<float>(2,1);
-  h33 = H.at<float>(2,2);
+    std::vector<char> buffer(65536);
+    rapidjson::FileWriteStream *fileStream=new rapidjson::FileWriteStream(jsonFile, buffer.data(), buffer.size());
+    rapidjson::PrettyWriter<rapidjson::FileWriteStream> *writer=new rapidjson::PrettyWriter<rapidjson::FileWriteStream>(*fileStream);
 
-  inliers.clear();
+    writer->StartArray();
+    for(size_t i=0; i<keypoints.size(); ++i)
+    {
+        const libAKAZE::Keypoint &keypoint=keypoints[i];
 
-  for (size_t i = 0; i < matches.size(); i+=2) {
-    x1 = matches[i].x;
-    y1 = matches[i].y;
-    x2 = matches[i+1].x;
-    y2 = matches[i+1].y;
+        writer->StartObject();
+        
+        writer->Key("class_id");
+        writer->Int(keypoint.class_id);
+        writer->Key("octave");
+        writer->Int(keypoint.octave);
 
-    s = h31*x1 + h32*y1 + h33;
-    x2m = (h11*x1 + h12*y1 + h13) / s;
-    y2m = (h21*x1 + h22*y1 + h23) / s;
-    dist = sqrt( pow(x2m-x2,2) + pow(y2m-y2,2));
+        writer->Key("ptX");
+        writer->Double(keypoint.pt.x());
+        writer->Key("ptX");
+        writer->Double(keypoint.pt.y());
+        writer->Key("size");
+        writer->Double(keypoint.size);
+        writer->Key("angle");
+        writer->Double(keypoint.angle);
+        writer->Key("response");
+        writer->Double(keypoint.response);
+#ifdef TRACK_REMOVED
+        writer->Key("removed");
+        writer->Double(keypoint.removed);
+#endif //TRACK_REMOVED
 
-    if (dist <= min_error) {
-      inliers.push_back(matches[i]);
-      inliers.push_back(matches[i+1]);
+        if(save_desc)
+        {
+            writer->Key("descriptors");
+            writer->StartArray();
+
+            const libAKAZE::BinaryVectorX &descriptor=desc[i];
+
+            for(size_t j=0; j<descriptor.size(); ++j)
+            {
+                writer->Int(descriptor[j]);
+            }
+            writer->EndArray();
+        }
+
+        writer->EndObject();
     }
-  }
+    writer->EndArray();
+
+    fclose(jsonFile);
+    return 0;
 }
+#endif //AKAZE_USE_JSON
 
 /* ************************************************************************* */
-void draw_inliers(const cv::Mat& img1, const cv::Mat& img2, cv::Mat& img_com,
-                  const std::vector<cv::Point2f>& ptpairs) {
-
-  int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
-  float rows1 = 0.0, cols1 = 0.0;
-  float rows2 = 0.0, cols2 = 0.0;
-  float ufactor = 0.0, vfactor = 0.0;
-
-  rows1 = img1.rows;
-  cols1 = img1.cols;
-  rows2 = img2.rows;
-  cols2 = img2.cols;
-  ufactor = (float)(cols1)/(float)(cols2);
-  vfactor = (float)(rows1)/(float)(rows2);
-
-  // This is in case the input images don't have the same resolution
-  cv::Mat img_aux = cv::Mat(cv::Size(img1.cols, img1.rows), CV_8UC3);
-  cv::resize(img2, img_aux, cv::Size(img1.cols, img1.rows), 0, 0, cv::INTER_LINEAR);
-
-  for (int i = 0; i < img_com.rows; i++) {
-    for (int j = 0; j < img_com.cols; j++) {
-      if (j < img1.cols) {
-        *(img_com.ptr<unsigned char>(i)+3*j) = *(img1.ptr<unsigned char>(i)+3*j);
-        *(img_com.ptr<unsigned char>(i)+3*j+1) = *(img1.ptr<unsigned char>(i)+3*j+1);
-        *(img_com.ptr<unsigned char>(i)+3*j+2) = *(img1.ptr<unsigned char>(i)+3*j+2);
-      }
-      else {
-        *(img_com.ptr<unsigned char>(i)+3*j) = *(img2.ptr<unsigned char>(i)+3*(j-img_aux.cols));
-        *(img_com.ptr<unsigned char>(i)+3*j+1) = *(img2.ptr<unsigned char>(i)+3*(j-img_aux.cols)+1);
-        *(img_com.ptr<unsigned char>(i)+3*j+2) = *(img2.ptr<unsigned char>(i)+3*(j-img_aux.cols)+2);
-      }
-    }
-  }
-
-  for (size_t i = 0; i < ptpairs.size(); i+= 2) {
-    x1 = (int)(ptpairs[i].x+.5);
-    y1 = (int)(ptpairs[i].y+.5);
-    x2 = (int)(ptpairs[i+1].x*ufactor+img1.cols+.5);
-    y2 = (int)(ptpairs[i+1].y*vfactor+.5);
-    cv::line(img_com, cv::Point(x1,y1), cv::Point(x2,y2), cv::Scalar(255,0,0), 2);
-  }
-}
-
-/* ************************************************************************* */
-void draw_inliers(const cv::Mat& img1, const cv::Mat& img2, cv::Mat& img_com,
-                  const std::vector<cv::Point2f>& ptpairs, int color) {
-
-  int x1 = 0, y1 = 0, x2 = 0, y2 = 0;
-  float rows1 = 0.0, cols1 = 0.0;
-  float rows2 = 0.0, cols2 = 0.0;
-  float ufactor = 0.0, vfactor = 0.0;
-
-  rows1 = img1.rows;
-  cols1 = img1.cols;
-  rows2 = img2.rows;
-  cols2 = img2.cols;
-  ufactor = (float)(cols1)/(float)(cols2);
-  vfactor = (float)(rows1)/(float)(rows2);
-
-  // This is in case the input images don't have the same resolution
-  cv::Mat img_aux = cv::Mat(cv::Size(img1.cols, img1.rows), CV_8UC3);
-  cv::resize(img2, img_aux, cv::Size(img1.cols, img1.rows), 0, 0, cv::INTER_LINEAR);
-
-  for (int i = 0; i < img_com.rows; i++) {
-    for (int j = 0; j < img_com.cols; j++) {
-      if (j < img1.cols) {
-        *(img_com.ptr<unsigned char>(i)+3*j) = *(img1.ptr<unsigned char>(i)+3*j);
-        *(img_com.ptr<unsigned char>(i)+3*j+1) = *(img1.ptr<unsigned char>(i)+3*j+1);
-        *(img_com.ptr<unsigned char>(i)+3*j+2) = *(img1.ptr<unsigned char>(i)+3*j+2);
-      }
-      else {
-        *(img_com.ptr<unsigned char>(i)+3*j) = *(img2.ptr<unsigned char>(i)+3*(j-img_aux.cols));
-        *(img_com.ptr<unsigned char>(i)+3*j+1) = *(img2.ptr<unsigned char>(i)+3*(j-img_aux.cols)+1);
-        *(img_com.ptr<unsigned char>(i)+3*j+2) = *(img2.ptr<unsigned char>(i)+3*(j-img_aux.cols)+2);
-      }
-    }
-  }
-
-  for (size_t i = 0; i < ptpairs.size(); i+= 2) {
-    x1 = (int)(ptpairs[i].x+.5);
-    y1 = (int)(ptpairs[i].y+.5);
-    x2 = (int)(ptpairs[i+1].x*ufactor+img1.cols+.5);
-    y2 = (int)(ptpairs[i+1].y*vfactor+.5);
-
-    if (color == 0)
-      cv::line(img_com, cv::Point(x1,y1), cv::Point(x2,y2), cv::Scalar(255,255,0), 2);
-    else if (color == 1)
-      cv::line(img_com, cv::Point(x1,y1), cv::Point(x2,y2), cv::Scalar(255,0,0), 2);
-    else if (color == 2)
-      cv::line(img_com, cv::Point(x1,y1), cv::Point(x2,y2), cv::Scalar(0,0,255), 2);
-  }
-}
-
-/* ************************************************************************* */
-bool read_homography(const string& hFile, cv::Mat& H1toN) {
+bool read_homography(const std::string& hFile, Eigen::Matrix3f& H1toN) {
 
   float h11 = 0.0, h12 = 0.0, h13 = 0.0;
   float h21 = 0.0, h22 = 0.0, h23 = 0.0;
@@ -345,126 +483,148 @@ bool read_homography(const string& hFile, cv::Mat& H1toN) {
   const int tmp_buf_size = 256;
   char tmp_buf[tmp_buf_size];
 
-  // Allocate memory for the OpenCV matrices
-  H1toN = cv::Mat::zeros(3,3,CV_32FC1);
+  // Allocate memory for the Homography matrices
+  H1toN.setZero();
 
-  string filename(hFile);
-  ifstream pf;
+  std::string filename(hFile);
+  std::ifstream pf;
   pf.open(filename.c_str(), std::ifstream::in);
 
-  if (!pf.is_open())
-    return false;
+  if (!pf.is_open()) return false;
 
-  pf.getline(tmp_buf,tmp_buf_size);
-  sscanf(tmp_buf,"%f %f %f",&h11,&h12,&h13);
+  pf.getline(tmp_buf, tmp_buf_size);
+  sscanf(tmp_buf, "%f %f %f", &h11, &h12, &h13);
 
-  pf.getline(tmp_buf,tmp_buf_size);
-  sscanf(tmp_buf,"%f %f %f",&h21,&h22,&h23);
+  pf.getline(tmp_buf, tmp_buf_size);
+  sscanf(tmp_buf, "%f %f %f", &h21, &h22, &h23);
 
-  pf.getline(tmp_buf,tmp_buf_size);
-  sscanf(tmp_buf,"%f %f %f",&h31,&h32,&h33);
+  pf.getline(tmp_buf, tmp_buf_size);
+  sscanf(tmp_buf, "%f %f %f", &h31, &h32, &h33);
 
   pf.close();
 
-  H1toN.at<float>(0,0) = h11 / h33;
-  H1toN.at<float>(0,1) = h12 / h33;
-  H1toN.at<float>(0,2) = h13 / h33;
+  H1toN(0, 0) = h11 / h33;
+  H1toN(0, 1) = h12 / h33;
+  H1toN(0, 2) = h13 / h33;
 
-  H1toN.at<float>(1,0) = h21 / h33;
-  H1toN.at<float>(1,1) = h22 / h33;
-  H1toN.at<float>(1,2) = h23 / h33;
+  H1toN(1, 0) = h21 / h33;
+  H1toN(1, 1) = h22 / h33;
+  H1toN(1, 2) = h23 / h33;
 
-  H1toN.at<float>(2,0) = h31 / h33;
-  H1toN.at<float>(2,1) = h32 / h33;
-  H1toN.at<float>(2,2) = h33 / h33;
+  H1toN(2, 0) = h31 / h33;
+  H1toN(2, 1) = h32 / h33;
+  H1toN(2, 2) = h33 / h33;
 
   return true;
 }
 
 /* ************************************************************************* */
-const size_t length = string("--descriptor_channels").size() + 2;
+const size_t length = std::string("--descriptor_channels").size() + 2;
 static inline std::ostream& cout_help() {
-  cout << setw(length);
-  return cout;
-}
-
-/* ************************************************************************* */
-static inline std::string toUpper(std::string s) {
-  std::transform(s.begin(), s.end(), s.begin(), ::toupper);
-  return s;
+  std::cout << std::setw(length);
+  return std::cout;
 }
 
 /* ************************************************************************* */
 void show_input_options_help(int example) {
 
   fflush(stdout);
-  cout << "A-KAZE Features" << endl;
-  cout << "Usage: ";
+  std::cout << "A-KAZE Features" << std::endl;
+  std::cout << "Usage: ";
 
   if (example == 0) {
-    cout << "./akaze_features img.jpg [options]" << endl;
+    std::cout << "./akaze_features img.jpg output.jpg [options]" << std::endl;
+  } else if (example == 1) {
+    std::cout << "./akaze_match img1.jpg img2.pgm homography.txt output.jpg [options]"
+         << std::endl;
   }
-  else if (example == 1) {
-    cout << "./akaze_match img1.jpg img2.pgm [homography.txt] [options]" << endl;
-  }
-  else if (example == 2) {
-    cout << "./akaze_compare img1.jpg img2.pgm [homography.txt] [options]" << endl;
-  }
-  
-  cout << endl;
-  cout_help() << "homography.txt is optional. If the txt file is not provided a planar homography will be estimated using RANSAC" << endl;
 
-  cout << endl;
-  cout_help() << "Options below are not mandatory. Unless specified, default arguments are used." << endl << endl;  
+  std::cout << std::endl;
+  cout_help() << "homography.txt is optional for image matching. If it is "
+                 "present, only the inliers are shown." << std::endl;
+
+  std::cout << std::endl;
+  cout_help() << "Options below are not mandatory. Unless specified, default "
+                 "arguments are used." << std::endl << std::endl;
 
   // Justify on the left
-  cout << left;
+  std::cout << std::left;
 
   // Generalities
-  cout_help() << "--help" << "Show the command line options" << endl;
-  cout_help() << "--verbose " << "Verbosity is required" << endl;
-  cout_help() << endl;
+  cout_help() << "--help"
+              << "Show the command line options" << std::endl;
+  cout_help() << "--verbose "
+              << "Verbosity is required" << std::endl;
+  cout_help() << "--num_threads"
+              << "Number of threads to run AKAZE with" << std::endl;
+  cout_help() << std::endl;
 
   // Scale-space parameters
-  cout_help() << "--soffset" << "Base scale offset (sigma units)" << endl;
-  cout_help() << "--omax" << "Maximum octave of image evolution" << endl;
-  cout_help() << "--nsublevels" << "Number of sublevels per octave" << endl;
-  cout_help() << "--diffusivity" << "Diffusivity function. Possible values:" << endl;
-  cout_help() << " " << "0 -> Perona-Malik, g1 = exp(-|dL|^2/k^2)" << endl;
-  cout_help() << " " << "1 -> Perona-Malik, g2 = 1 / (1 + dL^2 / k^2)" << endl;
-  cout_help() << " " << "2 -> Weickert diffusivity" << endl;
-  cout_help() << " " << "3 -> Charbonnier diffusivity" << endl;
-  cout_help() << endl;
+  cout_help() << "--soffset"
+              << "Base scale offset (sigma units)" << std::endl;
+  cout_help() << "--omax"
+              << "Maximum octave of image evolution" << std::endl;
+  cout_help() << "--nsublevels"
+              << "Number of sublevels per octave" << std::endl;
+  cout_help() << "--diffusivity"
+              << "Diffusivity function. Possible values:" << std::endl;
+  cout_help() << " "
+              << "0 -> Perona-Malik, g1 = exp(-|dL|^2/k^2)" << std::endl;
+  cout_help() << " "
+              << "1 -> Perona-Malik, g2 = 1 / (1 + dL^2 / k^2)" << std::endl;
+  cout_help() << " "
+              << "2 -> Weickert diffusivity" << std::endl;
+  cout_help() << " "
+              << "3 -> Charbonnier diffusivity" << std::endl;
+  cout_help() << std::endl;
 
   // Feature detection parameters.
-  cout_help() << "--dthreshold" << "Feature detector threshold response for keypoints" << endl;
-  cout_help() << " " << "(0.001 can be a good value)" << endl;
-  cout_help() << endl;
-  cout_help() << endl;
+  cout_help() << "--dthreshold"
+              << "Feature detector threshold response for keypoints" << std::endl;
+  cout_help() << " "
+              << "(0.001 can be a good value)" << std::endl;
+  cout_help() << std::endl;
+  cout_help() << std::endl;
 
   // Descriptor parameters.
-  cout_help() << "--descriptor" << "Descriptor Type. Possible values:" << endl;
-  cout_help() << " " << "0 -> SURF_UPRIGHT" << endl;
-  cout_help() << " " << "1 -> SURF" << endl;
-  cout_help() << " " << "2 -> M-SURF_UPRIGHT," << endl;
-  cout_help() << " " << "3 -> M-SURF" << endl;
-  cout_help() << " " << "4 -> M-LDB_UPRIGHT" << endl;
-  cout_help() << " " << "5 -> M-LDB" << endl;
-  cout_help() << endl;
+  cout_help() << "--descriptor"
+              << "Descriptor Type. Possible values:" << std::endl;
+  cout_help() << " "
+              << "0 -> SURF_UPRIGHT" << std::endl;
+  cout_help() << " "
+              << "1 -> SURF" << std::endl;
+  cout_help() << " "
+              << "2 -> M-SURF_UPRIGHT," << std::endl;
+  cout_help() << " "
+              << "3 -> M-SURF" << std::endl;
+  cout_help() << " "
+              << "4 -> M-LDB_UPRIGHT" << std::endl;
+  cout_help() << " "
+              << "5 -> M-LDB" << std::endl;
+  cout_help() << std::endl;
 
-  cout_help() << "--descriptor_channels " << "Descriptor Channels for M-LDB. Valid values: " << endl;
-  cout_help() << " " << "1 -> intensity" << endl;
-  cout_help() << " " << "2 -> intensity + gradient magnitude" << endl;
-  cout_help() << " " << "3 -> intensity + X and Y gradients" <<endl;
-  cout_help() << endl;
+  cout_help() << "--descriptor_channels "
+              << "Descriptor Channels for M-LDB. Valid values: " << std::endl;
+  cout_help() << " "
+              << "1 -> intensity" << std::endl;
+  cout_help() << " "
+              << "2 -> intensity + gradient magnitude" << std::endl;
+  cout_help() << " "
+              << "3 -> intensity + X and Y gradients" << std::endl;
+  cout_help() << std::endl;
 
-  cout_help() << "--descriptor_size" << "Descriptor size for M-LDB in bits." << endl;
-  cout_help() << " " << "0: means the full length descriptor (486)!!" << endl;
-  cout_help() << endl;
+  cout_help() << "--descriptor_size"
+              << "Descriptor size for M-LDB in bits." << std::endl;
+  cout_help() << " "
+              << "0: means the full length descriptor (486)!!" << std::endl;
+  cout_help() << std::endl;
 
   // Save results?
-  cout_help() << "--show_results" << "Possible values below:" << endl;
-  cout_help() << " " << "1 -> show detection results." << endl;
-  cout_help() << " " << "0 -> don't show detection results" << endl;
-  cout_help() << endl;
+  cout_help() << "--show_results"
+              << "Possible values below:" << std::endl;
+  cout_help() << " "
+              << "1 -> show detection results." << std::endl;
+  cout_help() << " "
+              << "0 -> don't show detection results" << std::endl;
+  cout_help() << std::endl;
 }

@@ -1,0 +1,4 @@
+#cmakedefine AKAZE_USE_OPENCV
+#cmakedefine AKAZE_USE_OPENCL
+#cmakedefine AKAZE_USE_CUDA
+#cmakedefine AKAZE_USE_JSON

@@ -10,16 +10,20 @@
  * [1] S. Grewenig, J. Weickert, C. Schroers, A. Bruhn. Cyclic Schemes for
  * PDE-Based Image Analysis. Technical Report No. 327, Department of Mathematics,
  * Saarland University, Saarbrücken, Germany, March 2013
- * [2] S. Grewenig, J. Weickert, A. Bruhn. From box filtering to fast explicit diffusion.
+ * [2] S. Grewenig, J. Weickert, A. Bruhn. From box filtering to fast explicit
+ * diffusion.
  * DAGM, 2010
  *
 */
 
-#pragma once
+#ifndef AKAZE_SRC_FED_H_
+#define AKAZE_SRC_FED_H_
 
 /* ************************************************************************* */
 // System
 #include <vector>
+
+namespace libAKAZE {
 
 /* ************************************************************************* */
 /// This function allocates an array of the least number of time steps such
@@ -35,7 +39,7 @@ int fed_tau_by_process_time(const float T, const int M, const float tau_max,
                             const bool reordering, std::vector<float>& tau);
 
 /// This function allocates an array of the least number of time steps such
-/// that a certain stopping time for the whole process can be obtained and fills it
+/// that a certain stopping time for the whole process can be obtained and fills
 /// it with the respective FED time step sizes for one cycle
 /// The function returns the number of time steps per cycle or 0 on failure
 /// @param t Desired cycle stopping time
@@ -58,3 +62,7 @@ int fed_tau_internal(const int n, const float scale, const float tau_max,
 
 /// This function checks if a number is prime or not
 bool fed_is_prime_internal(const int number);
+
+}  // namespace libAKAZE
+
+#endif  // AKAZE_SRC_FED_H_
