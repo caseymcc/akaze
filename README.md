@@ -12,8 +12,6 @@ The interface is as close to possible as the original version. For the CPU versi
 
 For a detailed description, please refer to <https://github.com/pablofdezalc/akaze> and the above project pages.
 
-## Optimizations
-The code has been optimized with the goal to maintain the same interface as well as to produce the same results as the original code. This means that certain tradeoffs have been necessary, in particular in the way keypoints are filtered. One difference remains though related to finding scale space extrema, which has been reported as an issue here:
 
 ## Current status
 - Eigen has replaced OpenCV in API
@@ -26,11 +24,6 @@ The code has been optimized with the goal to maintain the same interface as well
  - Implementation moved to libAKAZE::cuda
  - Functionality current not tested
  - Need to modify API to work off eigen
-
-Major optimizations are possible, but this is work in progress. These optimizations will relax the constraint of having results that are identical to the original code.
-
-## Matcher
-A not very optimized matcher is also provided. It returns a std::vector\<std::vector\<cv::DMatch\>\> with the two closest matches.
 
 ## Benchmarks
 The following benchmarks are measured on the img1.pgm in the iguazu dataset provided by the original authors, and are averages over 100 runs. The computer is a 16 core Xeon running at 2.6 GHz with 32 GB of RAM and an Nvidia Titan X (Maxwell). The operating system is Ubuntu 14.04, with CUDA 8.0.
@@ -51,11 +44,11 @@ This code was created as a joint effort between
 - Alessandro Pieropan https://github.com/CoffeRobot
 
 #### Optimizations (from https://github.com/nbergst/akaze)
-The code has been optimized with the goal to maintain ths same interface as well as to produce the same results as the original code. This means that certain tradeoffs have been necessary, in particular in the way keypoints are filtered. One difference remain though related to finding scale space extrema, which has been reported as an issue here:
+The code has been optimized with the goal to maintain the same interface as well as to produce the same results as the original code. This means that certain tradeoffs have been necessary, in particular in the way keypoints are filtered. One difference remains though related to finding scale space extrema, which has been reported as an issue here: <https://github.com/pablofdezalc/akaze/issues/24>
+Major optimizations are possible, but this is work in progress. These optimizations will relax the constraint of having results that are identical to the original code.
 
-<https://github.com/pablofdezalc/akaze/issues/24>
-
-Major optimizations are possible, but this is work in progress. These optimizations will relax the constraint to have identical results as the original code.
+#### Matcher
+A not very optimized matcher is also provided. It returns a std::vector\<std::vector\<cv::DMatch\>\> with the two closest matches.
 
 #### Limitations
 - Previous limitations with respect to the number of keypoints are more or less gone. Set the maximum number of keypoints in AKAZEConfig.h. This is done since cuda memory is preallocated..
