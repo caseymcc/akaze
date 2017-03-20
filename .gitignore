@@ -221,3 +221,7 @@ doc/
 # Emacs
 .#*
 \#*
+_build64
+test
+output
+outputOrg

@@ -26,13 +26,15 @@
 #include "timer/timer.hpp"
 
 #include <Eigen/Dense>
+
+#define _USE_MATH_DEFINES
 #include <math.h>
 #include <cassert>
 #include <ctime>
 #include <iostream>
 #include <fstream>
 
-#define _USE_MATH_DEFINESo
+
 
 using namespace libAKAZE;
 
@@ -64,7 +66,7 @@ void AKAZE::Allocate_Memory_Evolution()
 {
     generateEvolution(options_, evolution_);
 
-    //Allocate cv::Mats for evolutions
+    //Allocate memory for evolutions
     for(int i=0; i<evolution_.size(); ++i)
     {
         TEvolution &step=evolution_[i];
@@ -551,16 +553,19 @@ boost::python::tuple AKAZE::Compute_Descriptors_() {
  * @param kpts Vector of detected keypoints
  * @param desc Matrix to store the descriptors
 */
-void AKAZE::Compute_Descriptors(std::vector<Keypoint>& kpts,
-                                Descriptors& desc) {
+void AKAZE::Compute_Descriptors(std::vector<Keypoint> &kpts,
+                                Descriptors &desc)
+{
+    size_t descriptorSize;
+
   // Allocate memory for the matrix with the descriptors
   if (options_.descriptor < MLDB_UPRIGHT)
   {
-    desc.float_descriptor.resize(kpts.size());
+      descriptorSize=64;
+    desc.floatResize(kpts.size(), descriptorSize);
   }
   else
   {
-    desc.binary_descriptor.resize(kpts.size());
     // We use the full length binary descriptor -> 486 bits
     int t;
 
@@ -569,13 +574,14 @@ void AKAZE::Compute_Descriptors(std::vector<Keypoint>& kpts,
     else
       t = options_.descriptor_size;
 
-    size_t descriptorSize=ceil((float)t/8);
+    descriptorSize=ceil((float)t/8);
     
-    for(int i=0; i<desc.binary_descriptor.size(); i++)
-    {
-        desc.binary_descriptor[i].resize(descriptorSize);
-        desc.binary_descriptor[i].setZero(descriptorSize);
-    }
+    desc.binaryResize(kpts.size(), descriptorSize);
+//    for(int i=0; i<desc.binary_descriptor.size(); i++)
+//    {
+//        desc.binary_descriptor[i].resize(descriptorSize);
+//        desc.binary_descriptor[i].setZero(descriptorSize);
+//    }
   }
 
   timing_.orientation=0.0;
@@ -593,7 +599,7 @@ void AKAZE::Compute_Descriptors(std::vector<Keypoint>& kpts,
 #pragma omp parallel for
 #endif
       for (int i = 0; i < (int)(kpts.size()); i++) {
-        Get_SURF_Descriptor_Upright_64(kpts[i], desc.float_descriptor[i]);
+        Get_SURF_Descriptor_Upright_64(kpts[i], desc.floatData(i), descriptorSize);
       }
     } break;
     case SURF: {
@@ -602,7 +608,7 @@ void AKAZE::Compute_Descriptors(std::vector<Keypoint>& kpts,
 #endif
       for (int i = 0; i < (int)(kpts.size()); i++) {
         Compute_Main_Orientation(kpts[i]);
-        Get_SURF_Descriptor_64(kpts[i], desc.float_descriptor[i]);
+        Get_SURF_Descriptor_64(kpts[i], desc.floatData(i), descriptorSize);
       }
     } break;
     case MSURF_UPRIGHT:  // Upright descriptors, not invariant to rotation
@@ -611,7 +617,7 @@ void AKAZE::Compute_Descriptors(std::vector<Keypoint>& kpts,
 #pragma omp parallel for
 #endif
       for (int i = 0; i < (int)(kpts.size()); i++) {
-        Get_MSURF_Upright_Descriptor_64(kpts[i], desc.float_descriptor[i]);
+        Get_MSURF_Upright_Descriptor_64(kpts[i], desc.floatData(i), descriptorSize);
       }
     } break;
     case MSURF: {
@@ -620,7 +626,7 @@ void AKAZE::Compute_Descriptors(std::vector<Keypoint>& kpts,
 #endif
       for (int i = 0; i < (int)(kpts.size()); i++) {
         Compute_Main_Orientation(kpts[i]);
-        Get_MSURF_Descriptor_64(kpts[i], desc.float_descriptor[i]);
+        Get_MSURF_Descriptor_64(kpts[i], desc.floatData(i), descriptorSize);
       }
     } break;
     case MLDB_UPRIGHT: {
@@ -629,7 +635,7 @@ void AKAZE::Compute_Descriptors(std::vector<Keypoint>& kpts,
 #endif
       for (int i = 0; i < (int)(kpts.size()); i++) {
         Get_Upright_MLDB_Full_Descriptor(
-            kpts[i], (unsigned char*)(desc.binary_descriptor[i].data()));
+            kpts[i], desc.binaryData(i), descriptorSize);
       }
     } break;
     case MLDB: {
@@ -641,7 +647,7 @@ void AKAZE::Compute_Descriptors(std::vector<Keypoint>& kpts,
     {
         Compute_Main_Orientation(kpts[i]);
         Get_MLDB_Full_Descriptor(
-            kpts[i], (unsigned char*)(desc.binary_descriptor[i].data()));
+            kpts[i], desc.binaryData(i), descriptorSize);
     }
 #else
       for (int i = 0; i < (int)(kpts.size()); i++) {
@@ -650,7 +656,7 @@ void AKAZE::Compute_Descriptors(std::vector<Keypoint>& kpts,
         timing_.orientation+=subTimer.elapsedMs();
         subTimer.reset();
         Get_MLDB_Full_Descriptor(
-            kpts[i], (unsigned char*)(desc.binary_descriptor[i].data()));
+            kpts[i], desc.binaryData(i), descriptorSize);
         timing_.descriptoronly+=subTimer.elapsedMs();
       }
 #endif
@@ -731,8 +737,11 @@ void AKAZE::Compute_Main_Orientation(Keypoint& kpt) const {
 
 /* ************************************************************************* */
 void AKAZE::Get_SURF_Descriptor_Upright_64(const Keypoint& kpt,
-                                           Vector64f& desc) const {
-  desc.setZero(64);
+                                           float *desc, size_t size) const
+{
+  
+    for(size_t i=0; i<size; ++i)
+        desc[i]=0.0f;
 
   float dx = 0.0, dy = 0.0, mdx = 0.0, mdy = 0.0;
   float rx = 0.0, ry = 0.0, len = 0.0, xf = 0.0, yf = 0.0;
@@ -744,7 +753,7 @@ void AKAZE::Get_SURF_Descriptor_Upright_64(const Keypoint& kpt,
   int scale = 0, dsize = 0, level = 0;
 
   // Set the descriptor size and the sample and pattern sizes
-  dsize = 64;
+  dsize = size;
   sample_step = 5;
   pattern_size = 10;
 
@@ -800,10 +809,10 @@ void AKAZE::Get_SURF_Descriptor_Upright_64(const Keypoint& kpt,
       }
 
       // Add the values to the descriptor vector
-      desc(dcount++) = dx;
-      desc(dcount++) = dy;
-      desc(dcount++) = mdx;
-      desc(dcount++) = mdy;
+      desc[dcount++] = dx;
+      desc[dcount++] = dy;
+      desc[dcount++] = mdx;
+      desc[dcount++] = mdy;
 
       // Store the current length^2 of the vector
       len += dx * dx + dy * dy + mdx * mdx + mdy * mdy;
@@ -820,8 +829,10 @@ void AKAZE::Get_SURF_Descriptor_Upright_64(const Keypoint& kpt,
 
 /* ************************************************************************* */
 void AKAZE::Get_SURF_Descriptor_64(const Keypoint& kpt,
-                                   Vector64f& desc) const {
-  desc.setZero(64);
+                                   float *desc, size_t size) const
+{
+    for(size_t i=0; i<size; ++i)
+        desc[i]=0.0f;
   float dx = 0.0, dy = 0.0, mdx = 0.0, mdy = 0.0;
   float rx = 0.0, ry = 0.0, rrx = 0.0, rry = 0.0, len = 0.0, xf = 0.0, yf = 0.0;
   float sample_x = 0.0, sample_y = 0.0, co = 0.0, si = 0.0, angle = 0.0;
@@ -832,7 +843,7 @@ void AKAZE::Get_SURF_Descriptor_64(const Keypoint& kpt,
   int scale = 0, dsize = 0, level = 0;
 
   // Set the descriptor size and the sample and pattern sizes
-  dsize = 64;
+  dsize = size;
   sample_step = 5;
   pattern_size = 10;
 
@@ -895,10 +906,10 @@ void AKAZE::Get_SURF_Descriptor_64(const Keypoint& kpt,
       }
 
       // Add the values to the descriptor vector
-      desc(dcount++) = dx;
-      desc(dcount++) = dy;
-      desc(dcount++) = mdx;
-      desc(dcount++) = mdy;
+      desc[dcount++] = dx;
+      desc[dcount++] = dy;
+      desc[dcount++] = mdx;
+      desc[dcount++] = mdy;
 
       // Store the current length^2 of the vector
       len += dx * dx + dy * dy + mdx * mdx + mdy * mdy;
@@ -913,8 +924,10 @@ void AKAZE::Get_SURF_Descriptor_64(const Keypoint& kpt,
 
 /* ************************************************************************* */
 void AKAZE::Get_MSURF_Upright_Descriptor_64(const Keypoint& kpt,
-                                            Vector64f& desc) const {
-  desc.setZero(64);
+                                            float *desc, size_t size) const {
+    for(size_t i=0; i<size; ++i)
+        desc[i]=0.0f;
+
   float dx = 0.0, dy = 0.0, mdx = 0.0, mdy = 0.0, gauss_s1 = 0.0,
         gauss_s2 = 0.0;
   float rx = 0.0, ry = 0.0, len = 0.0, xf = 0.0, yf = 0.0, ys = 0.0, xs = 0.0;
@@ -929,7 +942,7 @@ void AKAZE::Get_MSURF_Upright_Descriptor_64(const Keypoint& kpt,
   float cx = -0.5, cy = 0.5;
 
   // Set the descriptor size and the sample and pattern sizes
-  dsize = 64;
+  dsize = size;
   sample_step = 5;
   pattern_size = 12;
 
@@ -1007,10 +1020,10 @@ void AKAZE::Get_MSURF_Upright_Descriptor_64(const Keypoint& kpt,
       // Add the values to the descriptor vector
       gauss_s2 = gaussian(cx - 2.0f, cy - 2.0f, 1.5f);
 
-      desc(dcount++) = dx * gauss_s2;
-      desc(dcount++) = dy * gauss_s2;
-      desc(dcount++) = mdx * gauss_s2;
-      desc(dcount++) = mdy * gauss_s2;
+      desc[dcount++] = dx * gauss_s2;
+      desc[dcount++] = dy * gauss_s2;
+      desc[dcount++] = mdx * gauss_s2;
+      desc[dcount++] = mdy * gauss_s2;
 
       len += (dx * dx + dy * dy + mdx * mdx + mdy * mdy) * gauss_s2 * gauss_s2;
 
@@ -1028,8 +1041,10 @@ void AKAZE::Get_MSURF_Upright_Descriptor_64(const Keypoint& kpt,
 
 /* ************************************************************************* */
 void AKAZE::Get_MSURF_Descriptor_64(const Keypoint& kpt,
-                                    Vector64f& desc) const {
-  desc.setZero(64);
+                                    float *desc, size_t size) const {
+    for(size_t i=0; i<size; ++i)
+        desc[i]=0.0f;
+
   float dx = 0.0, dy = 0.0, mdx = 0.0, mdy = 0.0, gauss_s1 = 0.0,
         gauss_s2 = 0.0;
   float rx = 0.0, ry = 0.0, rrx = 0.0, rry = 0.0, len = 0.0, xf = 0.0, yf = 0.0,
@@ -1045,7 +1060,7 @@ void AKAZE::Get_MSURF_Descriptor_64(const Keypoint& kpt,
   float cx = -0.5, cy = 0.5;
 
   // Set the descriptor size and the sample and pattern sizes
-  dsize = 64;
+  dsize = size;
   sample_step = 5;
   pattern_size = 12;
 
@@ -1127,10 +1142,10 @@ void AKAZE::Get_MSURF_Descriptor_64(const Keypoint& kpt,
 
       // Add the values to the descriptor vector
       gauss_s2 = gaussian(cx - 2.0f, cy - 2.0f, 1.5f);
-      desc(dcount++) = dx * gauss_s2;
-      desc(dcount++) = dy * gauss_s2;
-      desc(dcount++) = mdx * gauss_s2;
-      desc(dcount++) = mdy * gauss_s2;
+      desc[dcount++] = dx * gauss_s2;
+      desc[dcount++] = dy * gauss_s2;
+      desc[dcount++] = mdx * gauss_s2;
+      desc[dcount++] = mdy * gauss_s2;
 
       len += (dx * dx + dy * dy + mdx * mdx + mdy * mdy) * gauss_s2 * gauss_s2;
 
@@ -1143,12 +1158,15 @@ void AKAZE::Get_MSURF_Descriptor_64(const Keypoint& kpt,
   // convert to unit vector
   len = sqrt(len);
 
-  desc /= len;
+//  desc /= len;
+
+  for(size_t i=0; i<size; ++i)
+      desc[i]=desc[i]/len;
 }
 
 /* ************************************************************************* */
 void AKAZE::Get_MLDB_Full_Descriptor(const Keypoint& kpt,
-                                     unsigned char* desc) const {
+                                     unsigned char* desc, size_t size) const {
 
   const int max_channels = 3;
   assert(options_.descriptor_channels <= max_channels);
@@ -1174,7 +1192,7 @@ void AKAZE::Get_MLDB_Full_Descriptor(const Keypoint& kpt,
 
 /* ************************************************************************* */
 void AKAZE::Get_Upright_MLDB_Full_Descriptor(const Keypoint& kpt,
-                                             unsigned char* desc) const {
+                                             unsigned char* desc, size_t size) const {
 
   const int max_channels = 3;
   assert(options_.descriptor_channels <= max_channels);
@@ -1335,7 +1353,7 @@ void AKAZE::MLDB_Binary_Comparisons(float* values, unsigned char* desc,
 
 /* ************************************************************************* */
 void AKAZE::Get_MLDB_Descriptor_Subset(const Keypoint& kpt,
-                                       unsigned char* desc) {
+                                       unsigned char* desc, size_t size) {
   float di = 0.f, dx = 0.f, dy = 0.f;
   float rx = 0.f, ry = 0.f;
   float sample_x = 0.f, sample_y = 0.f;
@@ -1417,7 +1435,7 @@ void AKAZE::Get_MLDB_Descriptor_Subset(const Keypoint& kpt,
 
 /* ************************************************************************* */
 void AKAZE::Get_Upright_MLDB_Descriptor_Subset(const Keypoint& kpt,
-                                               unsigned char* desc) {
+                                               unsigned char* desc, size_t size) {
 
   float di = 0.0f, dx = 0.0f, dy = 0.0f;
   float rx = 0.0f, ry = 0.0f;

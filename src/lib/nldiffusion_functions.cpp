@@ -248,13 +248,13 @@ void halfsample_image(const RowMatrixXf& src, RowMatrixXf& dst) {
     return;
   }
 
-  const double x_kernel_clamped_size = static_cast<int>(ceil(x_kernel_size));
-  const double y_kernel_clamped_size = static_cast<int>(ceil(y_kernel_size));
+  const int x_kernel_clamped_size = static_cast<int>(ceil(x_kernel_size));
+  const int y_kernel_clamped_size = static_cast<int>(ceil(y_kernel_size));
 
   // Set up precomputed factor matrices.
   Eigen::RowVectorXf x_kernel_mul(x_kernel_clamped_size),
       y_kernel_mul(y_kernel_clamped_size);
-  y_kernel_mul.setConstant(1.0);
+  y_kernel_mul.setConstant(1.0f);
 
   Eigen::RowVectorXf temp_row(src.cols());
 #ifdef AKAZE_USE_OPENMP

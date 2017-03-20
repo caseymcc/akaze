@@ -1,9 +1,8 @@
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/Hunter/HunterGate.cmake)
 
 HunterGate(
-    URL "https://github.com/ruslo/hunter/archive/v0.17.12.tar.gz"
-    SHA1 "74cfa490ef0d3ff8916523bbf5add53049aad7be"
-    LOCAL
+    URL "https://github.com/ruslo/hunter/archive/v0.18.8.tar.gz"
+    SHA1 "b0302b2dd913c3c8f277c2a23e880d95d4ba5678"
 )
 
 project(AKAZE)

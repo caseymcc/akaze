@@ -87,18 +87,29 @@ int main(int argc, char* argv[])
     {
         if(akaze_options.type==libAKAZE::Options::Cuda)
         {
-            cerr<<"Error: --devices not supported for Cuda processing"<<endl;
+#ifdef AKAZE_USE_CUDA
+            std::vector<libAKAZE::cuda::CudaDevice> devices=libAKAZE::cuda::getDevices();
+
+            for(libAKAZE::cuda::CudaDevice &device:devices)
+            {
+                cout<<"Device: "<<device.name<<endl;
+            }
+
+            return 0;
+#else
+            cerr<<"Error: Cuda not supported in build"<<endl;
             return -1;
+#endif
         }
         else if(akaze_options.type==libAKAZE::Options::OpenCL)
         {
 #ifdef AKAZE_USE_OPENCL
-            std::vector<libAKAZE::cl::ProcessingDevice> devices=libAKAZE::cl::getDevices();
+            std::vector<libAKAZE::cl::OpenClDevice> devices=libAKAZE::cl::getDevices();
 
-            for(libAKAZE::cl::ProcessingDevice &device:devices)
+            for(libAKAZE::cl::OpenClDevice &device:devices)
             {
                 cout<<"Device: "<<device.name<<" ("<<device.platform<<", "<<device.vendor<<")"<<endl;
-                cout<<"  Type: "<<((device.type==libAKAZE::cl::ProcessingDevice::GPU)?"GPU":"CPU")<<endl;
+                cout<<"  Type: "<<((device.type==libAKAZE::cl::OpenClDevice::GPU)?"GPU":"CPU")<<endl;
                 cout<<"  Version: "<<device.version<<endl;
             }
 
@@ -123,8 +134,9 @@ int main(int argc, char* argv[])
     case libAKAZE::Options::Standard:
         value=featuresStandard(options, akaze_options);
         break;
-//    case libAKAZE::Options::Cuda:
-//        break;
+    case libAKAZE::Options::Cuda:
+        value=featuresCuda(options, akaze_options);
+        break;
     case libAKAZE::Options::OpenCL:
         value=featuresOpenCL(options, akaze_options);
         break;
@@ -171,12 +183,12 @@ int featuresStandard(ProgramOptions &options, libAKAZE::Options &akaze_options)
     // Save keypoints in ASCII format.
     if(akaze_options.descriptor < libAKAZE::MLDB_UPRIGHT)
     {
-        save_keypoints(options.keypoints_path, kpts, desc.float_descriptor, true);
+        save_keypoints(options.keypoints_path, kpts, desc, true);
     }
     else
     {
 //            save_keypoints(options.keypoints_path, kpts, desc.binary_descriptor, true);
-        save_keypoints_json(options.keypoints_path, kpts, desc.binary_descriptor, true);
+        save_keypoints_json(options.keypoints_path, kpts, desc, true);
     }
 
     // Convert the input image to RGB.
@@ -191,7 +203,54 @@ int featuresStandard(ProgramOptions &options, libAKAZE::Options &akaze_options)
 
 int featuresCuda(ProgramOptions &options, libAKAZE::Options &akaze_options)
 {
+#ifdef AKAZE_USE_CUDA
+    cimg_library::CImg<float> img(options.image_path.c_str());
+    RowMatrixXf img_32;
+    timer::Timer timer;
+    double totalTime;
+
+    ConvertCImgToEigen(img, img_32);
+    img_32/=255.0;
+
+    akaze_options.img_width=img_32.cols();
+    akaze_options.img_height=img_32.rows();
+
+    if(!options.device.empty())
+    {
+    }
+
+    // Extract features
+    libAKAZE::cuda::AKAZE evolution(akaze_options);
+    vector<libAKAZE::Keypoint> kpts;
+    libAKAZE::Descriptors desc;
+
+//    cudaProfilerStart();
+    timer.reset();
+    evolution.Create_Nonlinear_Scale_Space(img_32);
+    evolution.Feature_Detection(kpts);
+    
+    // Compute descriptors.
+    evolution.Compute_Descriptors(kpts, desc);
+    totalTime=timer.elapsedMs();
+
+//    cudaProfilerStop();
+
+    std::cout<<"Number of points: "<<kpts.size()<<std::endl;
+    evolution.Show_Computation_Times();
+    std::cout<<"Total Time: "<<totalTime<<std::endl;
+
+    std::string fileName="../output/keypoints_cuda.txt";
+    save_keypoints_json(fileName, kpts, desc, true);
+
+    cimg_library::CImg<float> rgb_image=
+        img.get_resize(img.width(), img.height(), img.depth(), 3);
+    draw_keypoints_vector(rgb_image, kpts);
+    rgb_image.save("../output/detected_features_cuda.jpg");
+
+    return 0;
+#else
     return -1;
+#endif
 }
 
 int featuresOpenCL(ProgramOptions &options, libAKAZE::Options &akaze_options)
@@ -283,7 +342,7 @@ int featuresOpenCL(ProgramOptions &options, libAKAZE::Options &akaze_options)
     std::cout<<"Total Time: "<<totalTime<<std::endl;
 
     std::string fileName="../output/keypoints_cl.txt";
-    save_keypoints_json(fileName, kpts, desc.binary_descriptor, true);
+    save_keypoints_json(fileName, kpts, desc, true);
 
     cimg_library::CImg<float> rgb_image=
         img.get_resize(img.width(), img.height(), img.depth(), 3);

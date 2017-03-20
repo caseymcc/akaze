@@ -701,7 +701,6 @@ void AKAZE::Compute_Descriptors(Descriptors &desc)
         desc.float_descriptor.resize(keypointsCount_);
     else
     {
-        desc.binary_descriptor.resize(keypointsCount_);
         // We use the full length binary descriptor -> 486 bits
         if(options_.descriptor_size==0)
             descriptorSize=(6+36+120) * options_.descriptor_channels;
@@ -709,9 +708,8 @@ void AKAZE::Compute_Descriptors(Descriptors &desc)
             descriptorSize=options_.descriptor_size;
 
         descriptorSize=ceil((float)descriptorSize/8);
-        for(int i=0; i < desc.binary_descriptor.size(); i++)
-            desc.binary_descriptor[i].resize(descriptorSize);
-        
+        desc.binaryResize(keypointsCount_, descriptorSize);
+
         //allocate opencl uffer
         descriptorBufferSize_=descriptorSize*keypointsCount_;
 
@@ -745,7 +743,7 @@ void AKAZE::Compute_Descriptors(Descriptors &desc)
             size_t index=0;
             for(int i=0; i<(int)(keypointsCount_); i++)
             {
-                memcpy(desc.binary_descriptor[i].data(), &descriptorBuffer[index], descriptorSize);
+                memcpy(desc.binaryData(), &descriptorBuffer[index], descriptorSize);
                 index+=descriptorSize;
             }
         }

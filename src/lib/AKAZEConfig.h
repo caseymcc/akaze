@@ -10,6 +10,7 @@
 
 /* ************************************************************************* */
 #include "akaze_config.h"
+#include "akazeTypes.h"
 #include <Eigen/Core>
 
 // OpenMP
@@ -47,26 +48,6 @@ const float gauss25[7][7] = {
     0.00046640f, 0.00019346f },
   { 0.00142946f, 0.00131956f, 0.00103800f, 0.00069579f, 0.00039744f,
     0.00019346f, 0.00008024f }
-};
-
-/* ************************************************************************* */
-// AKAZE Descriptor Type
-enum DESCRIPTOR_TYPE {
-  SURF_UPRIGHT = 0, // Upright descriptors, not invariant to rotation
-  SURF = 1,
-  MSURF_UPRIGHT = 2, // Upright descriptors, not invariant to rotation
-  MSURF = 3,
-  MLDB_UPRIGHT = 4, // Upright descriptors, not invariant to rotation
-  MLDB = 5
-};
-
-/* ************************************************************************* */
-// AKAZE Diffusivities
-enum DIFFUSIVITY_TYPE {
-  PM_G1 = 0,
-  PM_G2 = 1,
-  WEICKERT = 2,
-  CHARBONNIER = 3
 };
 
 /* ************************************************************************* */

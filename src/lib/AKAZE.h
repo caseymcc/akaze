@@ -19,6 +19,7 @@
 #include "fed.h"
 #include "nldiffusion_functions.h"
 #include <stdint.h>
+#include "akazeTypes.h"
 /* ************************************************************************* */
 
 //#define TRACK_REMOVED
@@ -26,32 +27,32 @@
 namespace libAKAZE
 {
 
-// Keypoint struct intended to mimic OpenCV.
-struct Keypoint
-{
-  Eigen::Vector2f pt;
-  float size;
-  float angle;
-  float response;
-  int octave;
-  int class_id;
-#ifdef TRACK_REMOVED
-  int removed;
-#endif //TRACK_REMOVED
-};
-
-// Descriptor type used for the float descriptors.
-typedef Eigen::Matrix<float, 64, 1> Vector64f;
-
-// This convenience typdef is used to hold binary descriptors such that each bit
-// is a value in the descriptor.
-typedef Eigen::Matrix<uint8_t, Eigen::Dynamic, 1> BinaryVectorX;
-
-struct Descriptors
-{
-  std::vector<Vector64f> float_descriptor;
-  std::vector<BinaryVectorX> binary_descriptor;
-};
+//// Keypoint struct intended to mimic OpenCV.
+//struct Keypoint
+//{
+//  Eigen::Vector2f pt;
+//  float size;
+//  float angle;
+//  float response;
+//  int octave;
+//  int class_id;
+//#ifdef TRACK_REMOVED
+//  int removed;
+//#endif //TRACK_REMOVED
+//};
+//
+//// Descriptor type used for the float descriptors.
+//typedef Eigen::Matrix<float, 64, 1> Vector64f;
+//
+//// This convenience typdef is used to hold binary descriptors such that each bit
+//// is a value in the descriptor.
+//typedef Eigen::Matrix<uint8_t, Eigen::Dynamic, 1> BinaryVectorX;
+//
+//struct Descriptors
+//{
+//  std::vector<Vector64f> float_descriptor;
+//  std::vector<BinaryVectorX> binary_descriptor;
+//};
 
 class AKAZE_EXPORT AKAZE
 {
@@ -122,8 +123,8 @@ class AKAZE_EXPORT AKAZE
   void Do_Subpixel_Refinement(std::vector<Keypoint>& kpts);
 
   // Feature description methods.
-  void Compute_Descriptors(std::vector<Keypoint>& kpts,
-                           Descriptors& desc);
+  void Compute_Descriptors(std::vector<Keypoint> &kpts,
+                           Descriptors &desc);
 
   // This method computes the main orientation for a given keypoint
   // @param kpt Input keypoint
@@ -144,7 +145,7 @@ class AKAZE_EXPORT AKAZE
   // al.,
   // Speeded Up Robust Features, ECCV, 2006
   void Get_SURF_Descriptor_Upright_64(const Keypoint& kpt,
-                                      Vector64f& desc) const;
+                                      float *desc, size_t size) const;
 
   // Compute the rotation invariant descriptor for the provided keypoint using
   // a
@@ -155,7 +156,7 @@ class AKAZE_EXPORT AKAZE
   // Gaussian weighting is performed. The descriptor is inspired from Bay et
   // al.,
   // Speeded Up Robust Features, ECCV, 2006
-  void Get_SURF_Descriptor_64(const Keypoint& kpt, Vector64f& desc) const;
+  void Get_SURF_Descriptor_64(const Keypoint& kpt, float *desc, size_t size) const;
 
   // Compute the upright descriptor (not rotation invariant) for the provided
   // keypoint using a
@@ -168,7 +169,7 @@ class AKAZE_EXPORT AKAZE
   // Feature Detection and Matching,
   // ECCV 2008
   void Get_MSURF_Upright_Descriptor_64(const Keypoint& kpt,
-                                       Vector64f& desc) const;
+                                       float *desc, size_t size) const;
 
   // Compute the rotation invariant descriptor for the provided keypoint using
   // a rectangular grid similar as the one used in M-SURF
@@ -179,34 +180,34 @@ class AKAZE_EXPORT AKAZE
   // from Agrawal et al., CenSurE: Center Surround Extremas for Realtime
   // Feature Detection and Matching,
   // ECCV 2008
-  void Get_MSURF_Descriptor_64(const Keypoint& kpt, Vector64f& desc) const;
+  void Get_MSURF_Descriptor_64(const Keypoint& kpt, float *desc, size_t size) const;
 
   // Compute the upright (not rotation invariant) M-LDB binary descriptor
   // (maximum descriptor length)
   // @param kpt Input keypoint
   // @param desc Binary-based descriptor
   void Get_Upright_MLDB_Full_Descriptor(const Keypoint& kpt,
-                                        unsigned char* desc) const;
+                                        unsigned char* desc, size_t size) const;
 
   // Computes the rotation invariant M-LDB binary descriptor (maximum
   // descriptor length)
   // @param kpt Input keypoint
   // @param desc Binary-based descriptor
   void Get_MLDB_Full_Descriptor(const Keypoint& kpt,
-                                unsigned char* desc) const;
+                                unsigned char* desc, size_t size) const;
   /// Compute the upright (not rotation invariant) M-LDB binary descriptor
   /// (specified descriptor length)
   /// @param kpt Input keypoint
   /// @param desc Binary-based descriptor
   void Get_Upright_MLDB_Descriptor_Subset(const Keypoint& kpt,
-                                          unsigned char* desc);
+                                          unsigned char* desc, size_t size);
 
   /// Computes the rotation invariant M-LDB binary descriptor (specified
   /// descriptor length)
   /// @param kpt Input keypoint
   /// @param desc Binary-based descriptor
   void Get_MLDB_Descriptor_Subset(const Keypoint& kpt,
-                                  unsigned char* desc);
+                                  unsigned char* desc, size_t size);
 
   // Fill the comparison values for the MLDB rotation invariant descriptor
   void MLDB_Fill_Values(float* values, int sample_step, int level, float xf,
