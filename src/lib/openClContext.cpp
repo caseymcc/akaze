@@ -207,12 +207,13 @@ std::vector<OpenClDevice> getDevices()
     return devices;
 }
 
-::cl::Context openDevice()
+::cl::Context openDevice(OpenClDevice &device)
 {
+    //user has asked us to get a device, lets assume they wanted a GPU so lets try that first and if no device exists
+    //then return first available CPU
+
     std::vector<::cl::Platform> platforms;
     ::cl::Platform::get(&platforms);
-
-    cl_device_id deviceId;
 
     for(size_t i=0; i<platforms.size(); ++i)
     {
@@ -220,11 +221,28 @@ std::vector<OpenClDevice> getDevices()
         std::vector<::cl::Device> platformDevices;
 
         platform.getDevices(CL_DEVICE_TYPE_ALL, &platformDevices);
-        if(!platformDevices.empty())
+        
+        for(::cl::Device &device:platformDevices)
         {
-            ::cl::Context context(platformDevices[0]);
+            cl_device_type deviceType;
 
-            checkInfo(platformDevices[0]);
+            device.getInfo(CL_DEVICE_TYPE, &deviceType);
+
+            if(deviceType!=CL_DEVICE_TYPE_GPU)
+                continue;
+
+            ::cl::Context context(device);
+
+            checkInfo(device);
+            return context;
+        }
+
+        //no longer picky take whatever
+        for(::cl::Device &device:platformDevices)
+        {
+            ::cl::Context context(device);
+
+            checkInfo(device);
             return context;
         }
     }
