@@ -25,40 +25,41 @@ namespace libAKAZE
 {
 namespace cuda
 {
-    class Matcher
-    {
+class AKAZE_EXPORT Matcher
+{
 
-    private:
-        int maxnquery;
-        unsigned char* descq_d;
+private:
+    int maxnquery;
+    unsigned char* descq_d;
 
-        int maxntrain;
-        unsigned char* desct_d;
+    int maxntrain;
+    unsigned char* desct_d;
 
-        cv::DMatch* dmatches_d;
-        cv::DMatch* dmatches_h;
+    Match* dmatches_d;
+    Match* dmatches_h;
 
-        size_t pitch;
+    size_t pitch;
 
-    public:
-        Matcher(): maxnquery(0), descq_d(NULL), maxntrain(0), desct_d(NULL),
-            dmatches_d(0), dmatches_h(0), pitch(0) {}
+public:
+    Matcher(): maxnquery(0), descq_d(NULL), maxntrain(0), desct_d(NULL),
+        dmatches_d(0), dmatches_h(0), pitch(0) {}
 
-        ~Matcher();
+    ~Matcher();
 
-        // python
-        cv::Mat bfmatch_(cv::Mat desc_query, cv::Mat desc_train);
+    // python
+//        cv::Mat bfmatch_(cv::Mat desc_query, cv::Mat desc_train);
 
-        void bfmatch(cv::Mat &desc_query, cv::Mat &desc_train,
-            std::vector<std::vector<cv::DMatch> > &dmatches);
+    void bfmatch(Descriptors &desc_query, Descriptors &desc_train,
+        std::vector<std::vector<Match> > &dmatches);
 
-    };
+};
 
-  class AKAZE {
+class AKAZE_EXPORT AKAZE
+{
 
   private:
 
-    AKAZEOptions options_;                      ///< Configuration options for AKAZE
+    Options options_;                      ///< Configuration options for AKAZE
     std::vector<TEvolution> evolution_;         ///< Vector of nonlinear diffusion evolution
 
     /// FED parameters
@@ -68,30 +69,33 @@ namespace cuda
     std::vector<int> nsteps_;                   ///< Vector of number of steps per cycle
 
     /// Matrices for the M-LDB descriptor computation
-    cv::Mat descriptorSamples_;
-    cv::Mat descriptorBits_;
-    cv::Mat bitMask_;
+    Eigen::MatrixXi descriptorSamples_;
+    Eigen::MatrixXi descriptorBits_;
 
     /// Computation times variables in ms
-    AKAZETiming timing_;
+    Timing timing_;
 
     /// CUDA memory buffers
     float *cuda_memory;
-    cv::KeyPoint *cuda_points;
-    cv::KeyPoint *cuda_bufferpoints;
-    cv::Mat cuda_desc;
+    Keypoint *cuda_points;
+    Keypoint *cuda_bufferpoints;
+    Descriptors cuda_desc;
+
     float* cuda_descbuffer;
     int* cuda_ptindices;
     CudaImage *cuda_images;
     std::vector<CudaImage> cuda_buffers;
     int nump;
 
+    int ncudaimages;                ///< Number of CUDA images allocated per octave
+    int maxkeypoints;               ///< Maximum number of keypoints allocated
+
   public:
 
     /// AKAZE constructor with input options
     /// @param options AKAZE configuration options
     /// @note This constructor allocates memory for the nonlinear scale space
-    AKAZE(const AKAZEOptions& options);
+    AKAZE(const Options& options);
 
     /// Destructor
     ~AKAZE();
@@ -102,11 +106,11 @@ namespace cuda
     /// This method creates the nonlinear scale space for a given image
     /// @param img Input image for which the nonlinear scale space needs to be created
     /// @return 0 if the nonlinear scale space was created successfully, -1 otherwise
-    int Create_Nonlinear_Scale_Space(const cv::Mat& img);
+    int Create_Nonlinear_Scale_Space(const RowMatrixXf& img);
 
     /// @brief This method selects interesting keypoints through the nonlinear scale space
     /// @param kpts Vector of detected keypoints
-    void Feature_Detection(std::vector<cv::KeyPoint>& kpts);
+    void Feature_Detection(std::vector<Keypoint>& kpts);
 
     /// This method computes the feature detector response for the nonlinear scale space
     /// @note We use the Hessian determinant as the feature detector response
@@ -116,16 +120,17 @@ namespace cuda
     void Compute_Multiscale_Derivatives();
 
     /// This method finds extrema in the nonlinear scale space
-    void Find_Scale_Space_Extrema(std::vector<cv::KeyPoint>& kpts);
+    void Find_Scale_Space_Extrema(std::vector<Keypoint>& kpts);
 
     /// This method performs subpixel refinement of the detected keypoints fitting a quadratic
-    void Do_Subpixel_Refinement(std::vector<cv::KeyPoint>& kpts);
+    void Do_Subpixel_Refinement(std::vector<Keypoint>& kpts);
 
     /// Feature description methods
 #ifdef USE_PYTHON
     boost::python::tuple Compute_Descriptors_();
 #endif // USE_PYTHON
-    void Compute_Descriptors(std::vector<cv::KeyPoint>& kpts, cv::Mat& desc);
+    void Compute_Descriptors(std::vector<Keypoint> &kpts,
+        Descriptors &desc);
 
     /// This method saves the scale space into jpg images
     void Save_Scale_Space();
@@ -137,7 +142,7 @@ namespace cuda
     void Show_Computation_Times() const;
 
     /// Return the computation times
-    AKAZETiming Get_Computation_Times() const {
+    Timing Get_Computation_Times() const {
       return timing_;
     }
   };
@@ -145,23 +150,10 @@ namespace cuda
   /* ************************************************************************* */
 
   /// This function sets default parameters for the A-KAZE detector
-  void setDefaultAKAZEOptions(AKAZEOptions& options);
+  void setDefaultAKAZEOptions(Options& options);
 
 
 
-  /// This function computes a (quasi-random) list of bits to be taken
-  /// from the full descriptor. To speed the extraction, the function creates
-  /// a list of the samples that are involved in generating at least a bit (sampleList)
-  /// and a list of the comparisons between those samples (comparisons)
-  /// @param sampleList
-  /// @param comparisons The matrix with the binary comparisons
-  /// @param nbits The number of bits of the descriptor
-  /// @param pattern_size The pattern size for the binary descriptor
-  /// @param nchannels Number of channels to consider in the descriptor (1-3)
-  /// @note The function keeps the 18 bits (3-channels by 6 comparisons) of the
-  /// coarser grid, since it provides the most robust estimations
-  void generateDescriptorSubsample(cv::Mat& sampleList, cv::Mat& comparisons,
-                                   int nbits, int pattern_size, int nchannels);
 
   /// This function checks descriptor limits for a given keypoint
   inline void check_descriptor_limits(int& x, int& y, int width, int height);
@@ -175,6 +167,18 @@ namespace cuda
   inline int fRound(float flt) {
     return (int)(flt+0.5f);
   }
+
+  struct AKAZE_EXPORT CudaDevice
+  {
+      int id;
+      std::string name;
+  };
+
+  AKAZE_EXPORT std::vector<CudaDevice> getDevices();
+
+  //AKAZE_EXPORT void openDevice();
+  //AKAZE_EXPORT void openDevice(std::string deviceName);
+  //AKAZE_EXPORT void openDevice(std::string platform, std::string deviceName);
 
 }}//namspace libAKAZE::cuda
 

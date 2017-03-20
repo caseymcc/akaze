@@ -108,8 +108,11 @@ void saveMatrixAsCsvFile(const RowMatrixXf& mat, std::string fileName)
 
 // Build a simple lookup table for the hamming distance of xor-ing two 8-bit
 // numbers.
-int HammingDistance(const libAKAZE::BinaryVectorX& desc1,
-                    const libAKAZE::BinaryVectorX& desc2) {
+//int HammingDistance(const libAKAZE::BinaryVectorX& desc1,
+//                    const libAKAZE::BinaryVectorX& desc2)
+int HammingDistance(const unsigned char *char1, const unsigned char *char2,
+    size_t num_bytes)
+{
   static const unsigned char pop_count_table[] = {
     0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 1, 2, 2, 3, 2, 3, 3, 4, 2,
     3, 3, 4, 3, 4, 4, 5, 1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5, 2, 3,
@@ -125,9 +128,9 @@ int HammingDistance(const libAKAZE::BinaryVectorX& desc1,
   };
 
   int result = 0;
-  const unsigned char* char1 = desc1.data();
-  const unsigned char* char2 = desc2.data();
-  const int num_bytes = desc1.size() / (8 * sizeof(unsigned char));
+//  const unsigned char* char1 = desc1.data();
+//  const unsigned char* char2 = desc2.data();
+//  const int num_bytes = desc1.size() / (8 * sizeof(unsigned char));
   for (size_t i = 0; i < num_bytes; i++) {
     result += pop_count_table[char1[i] ^ char2[i]];
   }
@@ -135,28 +138,61 @@ int HammingDistance(const libAKAZE::BinaryVectorX& desc1,
   return result;
 }
 
-void match_features(const std::vector<libAKAZE::Vector64f>& desc1,
-                    const std::vector<libAKAZE::Vector64f>& desc2,
-                    const double ratio,
-                    std::vector<std::pair<int, int> >& matches) {
+void match_features(const libAKAZE::Descriptors &desc1,
+    const libAKAZE::Descriptors &desc2,
+    const double ratio,
+    std::vector<std::pair<int, int> >& matches)
+{
+    if(desc1.isBinary())
+    {
+        if(desc2.isBinary())
+        {
+            match_binary_features(desc1.binaryData(), desc1.size(), desc2.binaryData(), desc2.size(), desc1.descriptorSize(), ratio, matches);
+            return;
+        }
+    }
+    else
+    {
+        if(!desc2.isBinary())
+        {
+            match_features(desc1.floatData(), desc1.size(), desc2.floatData(), desc2.size(), desc1.descriptorSize(), ratio, matches);
+            return;
+        }
+    }
+}
+
+void match_features(const float *desc1, size_t desc1Count,
+    const float *desc2, size_t desc2Count, size_t stride,
+    const double ratio, std::vector<std::pair<int, int> >& matches)
+{
   // Find all desc1 -> desc2 matches.
   typedef std::pair<float, int> MatchDistance;
 
-  std::vector<std::vector<MatchDistance> > match_distances(desc1.size());
+  std::vector<std::vector<MatchDistance> > match_distances(desc1Count);
   #ifdef AKAZE_USE_OPENMP
   #pragma omp parallel for
   #endif
-  for (int i = 0; i < desc1.size(); i++) {
-    match_distances[i].resize(desc2.size());
-    for (int j = 0; j < desc2.size(); j++) {
-      const float distance = (desc1[i] - desc2[j]).squaredNorm();
+
+  for (int i = 0; i < desc1Count; i++)
+  {
+      Eigen::Map<const Eigen::Matrix<float, Eigen::Dynamic, 1> > descMat1(&desc1[i*stride], desc1Count);
+
+    match_distances[i].resize(desc2Count);
+    for (int j = 0; j < desc2Count; j++)
+    {
+        Eigen::Map<const Eigen::Matrix<float, Eigen::Dynamic, 1> > descMat2(&desc2[j*stride], desc2Count);
+
+//      const float distance = (desc1[i] - desc2[j]).squaredNorm();
+        const float distance=(descMat1-descMat2).squaredNorm();
       match_distances[i][j] = std::make_pair(distance, j);
     }
   }
 
   // Only save the matches that pass the lowes ratio test.
-  matches.reserve(desc1.size());
-  for (int i = 0; i < match_distances.size(); i++) {
+  matches.reserve(desc1Count);
+  
+  for (int i = 0; i < match_distances.size(); i++)
+  {
     // Get the top 2 matches.
     std::partial_sort(match_distances[i].begin(),
                       match_distances[i].begin() + 2,
@@ -167,27 +203,29 @@ void match_features(const std::vector<libAKAZE::Vector64f>& desc1,
   }
 }
 
-void match_features(const std::vector<libAKAZE::BinaryVectorX>& desc1,
-                    const std::vector<libAKAZE::BinaryVectorX>& desc2,
-                    const double ratio,
-                    std::vector<std::pair<int, int> >& matches) {
+void match_binary_features(const uint8_t *desc1, size_t desc1Count,
+                    const uint8_t *desc2, size_t desc2Count, size_t stride,
+                    const double ratio, std::vector<std::pair<int, int> >& matches)
+{
   // Find all desc1 -> desc2 matches.
   typedef std::pair<int, int> MatchDistance;
 
-  std::vector<std::vector<MatchDistance> > match_distances(desc1.size());
+  std::vector<std::vector<MatchDistance> > match_distances(desc1Count);
 #ifdef AKAZE_USE_OPENMP
 #pragma omp parallel for
 #endif
-  for (int i = 0; i < desc1.size(); i++) {
-    match_distances[i].resize(desc2.size());
-    for (int j = 0; j < desc2.size(); j++) {
-      const int distance = HammingDistance(desc1[i], desc2[j]);
+  for (int i = 0; i < desc1Count; i++)
+  {
+    match_distances[i].resize(desc2Count);
+    for (int j = 0; j < desc2Count; j++)
+    {
+        const int distance=HammingDistance(&desc1[i*stride], &desc2[j*stride], stride);
       match_distances[i][j] = std::make_pair(distance, j);
     }
   }
 
   // Only save the matches that pass the lowes ratio test.
-  matches.reserve(desc1.size());
+  matches.reserve(desc1Count);
   for (int i = 0; i < match_distances.size(); i++) {
     // Get the top 2 matches.
     std::partial_sort(match_distances[i].begin(),
@@ -351,7 +389,7 @@ int save_keypoints(const std::string& outFile,
 
 int save_keypoints(const std::string& outFile,
                    const std::vector<libAKAZE::Keypoint>& kpts,
-                   const std::vector<libAKAZE::BinaryVectorX>& desc,
+                    const libAKAZE::Descriptors &desc,
                    bool save_desc) {
   if (kpts.size() == 0) {
     std::cerr << "No keypoints exist." << std::endl;
@@ -362,7 +400,8 @@ int save_keypoints(const std::string& outFile,
   float sc = 0.0;
 
   nkpts = (int)(kpts.size());
-  dsize = (int)(desc[0].size());
+  dsize=desc.descriptorSize();
+  const uint8_t *data=desc.binaryData();
 
   std::ofstream ipfile(outFile.c_str());
 
@@ -390,8 +429,10 @@ int save_keypoints(const std::string& outFile,
            << " " << 0.0 << " " << 1.0 / sc; /* 1/r^2 */
 
     // Here comes the descriptor
-    for (int j = 0; j < dsize; j++) {
-      ipfile << " " << (int)(desc[i](j));
+    size_t pos=i*dsize;
+    for(int j=0; j < dsize; j++)
+    {
+      ipfile << " " << data[pos+j];
     }
 
     ipfile << std::endl;
@@ -406,7 +447,7 @@ int save_keypoints(const std::string& outFile,
 #ifdef AKAZE_USE_JSON
 int save_keypoints_json(const std::string &outFile,
     const std::vector<libAKAZE::Keypoint> &keypoints,
-    const std::vector<libAKAZE::BinaryVectorX> &desc,
+    const libAKAZE::Descriptors &descriptors,
     bool save_desc)
 {
     if(keypoints.size()==0)
@@ -453,14 +494,15 @@ int save_keypoints_json(const std::string &outFile,
 
         if(save_desc)
         {
+            const uint8_t *data=descriptors.binaryData();
+            size_t descriptorSize=descriptors.descriptorSize();
+
             writer->Key("descriptors");
             writer->StartArray();
 
-            const libAKAZE::BinaryVectorX &descriptor=desc[i];
-
-            for(size_t j=0; j<descriptor.size(); ++j)
+            for(size_t j=0; j<descriptorSize; ++j)
             {
-                writer->Int(descriptor[j]);
+                writer->Int(data[j]);
             }
             writer->EndArray();
         }

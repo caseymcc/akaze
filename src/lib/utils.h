@@ -63,16 +63,21 @@ AKAZE_EXPORT void saveMatrixAsCsvFile(const RowMatrixXf& mat, std::string fileNa
 /* ************************************************************************* */
 // This function matches the descriptors from floating point AKAZE methods using
 // L2 distance and the nearest neighbor distance ratio (Lowes ratio)
-AKAZE_EXPORT void match_features(const std::vector<libAKAZE::Vector64f>& desc1,
-                    const std::vector<libAKAZE::Vector64f>& desc2,
-                    const double ratio,
-                    std::vector<std::pair<int, int> >& matches);
+AKAZE_EXPORT void match_features(const libAKAZE::Descriptors &desc1,
+    const libAKAZE::Descriptors &desc2,
+    const double ratio,
+    std::vector<std::pair<int, int> >& matches);
+
+
+void match_features(const float *desc1, size_t desc1Count,
+    const float *desc2, size_t desc2Count, size_t stride,
+    const double ratio, std::vector<std::pair<int, int> >& matches);
+
 // This function matches the descriptors from binary AKAZE (MLDB) methods using
 // Hamming distance and the nearest neighbor distance ratio (Lowes ratio)
-AKAZE_EXPORT void match_features(const std::vector<libAKAZE::BinaryVectorX>& desc1,
-                    const std::vector<libAKAZE::BinaryVectorX>& desc2,
-                    const double ratio,
-                    std::vector<std::pair<int, int> >& matches);
+void match_binary_features(const uint8_t *desc1, size_t desc1Count,
+    const uint8_t *desc2, size_t desc2Count, size_t stride,
+    const double ratio, std::vector<std::pair<int, int> >& matches);
 
 /// This function computes the set of inliers given a ground truth homography
 /// @param kpts1 Keypoints from first image
@@ -110,19 +115,22 @@ AKAZE_EXPORT void draw_matches(cimg_library::CImg<float>& image1,
 /// @param desc Matrix that contains the extracted descriptors
 /// @param save_desc Set to 1 if we want to save the descriptors
 AKAZE_EXPORT int save_keypoints(const std::string& outFile,
-                   const std::vector<libAKAZE::Keypoint>& kpts,
-                   const std::vector<libAKAZE::Vector64f>& desc,
-                   bool save_desc);
+    const std::vector<libAKAZE::Keypoint>& kpts,
+    //                   const std::vector<libAKAZE::Vector64f>& desc,
+    const libAKAZE::Descriptors &desc,
+    bool save_desc);
 
 AKAZE_EXPORT int save_keypoints(const std::string& outFile,
-                   const std::vector<libAKAZE::Keypoint>& kpts,
-                   const std::vector<libAKAZE::BinaryVectorX>& desc,
-                   bool save_desc);
+    const std::vector<libAKAZE::Keypoint>& kpts,
+//  const std::vector<libAKAZE::BinaryVectorX>& desc,
+    const libAKAZE::Descriptors &desc,
+    bool save_desc);
 
 #ifdef AKAZE_USE_JSON
 AKAZE_EXPORT int save_keypoints_json(const std::string& outFile,
     const std::vector<libAKAZE::Keypoint>& kpts,
-    const std::vector<libAKAZE::BinaryVectorX>& desc,
+//    const std::vector<libAKAZE::BinaryVectorX>& desc,
+    const libAKAZE::Descriptors &desc,
     bool save_desc);
 #endif //AKAZE_USE_JSON
 

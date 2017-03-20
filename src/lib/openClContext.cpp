@@ -139,11 +139,11 @@ OpenCLContext *getOpenClContext(::cl::Context context)
     return kernel;
 }
 
-std::vector<ProcessingDevice> getDevices()
+std::vector<OpenClDevice> getDevices()
 {
     std::vector<::cl::Platform> platforms;
     ::cl::Platform::get(&platforms);
-    std::vector<ProcessingDevice> devices;
+    std::vector<OpenClDevice> devices;
 
     for(size_t i=0; i<platforms.size(); ++i)
     {
@@ -171,7 +171,7 @@ std::vector<ProcessingDevice> getDevices()
 
         for(::cl::Device &device:platformDevices)
         {
-            ProcessingDevice deviceInfo;
+            OpenClDevice deviceInfo;
             cl_device_type deviceType;
 
             deviceInfo.deviceId=device();
@@ -193,10 +193,10 @@ std::vector<ProcessingDevice> getDevices()
             switch(deviceType)
             {
             case CL_DEVICE_TYPE_CPU:
-                deviceInfo.type=ProcessingDevice::CPU;
+                deviceInfo.type=OpenClDevice::CPU;
                 break;
             case CL_DEVICE_TYPE_GPU:
-                deviceInfo.type=ProcessingDevice::GPU;
+                deviceInfo.type=OpenClDevice::GPU;
                 break;
             }
 

@@ -15,7 +15,7 @@ class OpenCLContext;
 OpenCLContext *getOpenClContext(::cl::Context context);
 ::cl::Kernel getKernel(::cl::Context context, std::string kernelName, std::string fileName);
 
-struct AKAZE_EXPORT ProcessingDevice
+struct AKAZE_EXPORT OpenClDevice
 {
     enum Type
     {
@@ -31,7 +31,7 @@ struct AKAZE_EXPORT ProcessingDevice
     std::string version;
 };
 
-AKAZE_EXPORT std::vector<ProcessingDevice> getDevices();
+AKAZE_EXPORT std::vector<OpenClDevice> getDevices();
 
 AKAZE_EXPORT ::cl::Context openDevice();
 AKAZE_EXPORT ::cl::Context openDevice(std::string deviceName);

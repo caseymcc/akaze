@@ -3,7 +3,7 @@
 #find_package(OpenCV REQUIRED)
 
 hunter_add_package(Eigen)
-find_package(Eigen REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 hunter_add_package(Jpeg)
 find_package(JPEG CONFIG REQUIRED)
@@ -35,7 +35,7 @@ include_directories(${cimg_INCLUDE_DIR} ${timer_INCLUDE_DIR} ./)
 
 set(AKAZE_USE_CUDA FALSE)
 if(CUDA_FOUND)
-#  set(AKAZE_USE_CUDA TRUE)
+  set(AKAZE_USE_CUDA TRUE)
 endif()
 
 # ===================================
@@ -100,6 +100,7 @@ set(AKAZE_Runtime_Directories "")
 set(AKAZE_HEADERS
     lib/AKAZEConfig.h
     lib/AKAZE.h
+	lib/akazeTypes.h
     lib/fed.h
     lib/nldiffusion_functions.h
     lib/utils.h
@@ -124,7 +125,7 @@ if(AKAZE_USE_OPENCV)
 		${_OpenCV_LIB_PATH}
 	)
 
-	#opencv's path has \s
+	#opencv's path has \'s
 	string(REGEX REPLACE "\\\\" "/" AKAZE_Runtime_Directories ${AKAZE_Runtime_Directories}) 
 endif()
 
@@ -167,7 +168,16 @@ if(AKAZE_USE_JSON)
 		RapidJSON::rapidjson
     )
 endif()
- 
+
+if(AKAZE_USE_CUDA)
+    set(AKAZE_HEADERS ${AKAZE_HEADERS}
+      lib/AKAZE_cuda.h
+    )
+    set(AKAZE_SRCS ${AKAZE_SRCS}
+      lib/AKAZE_cuda.cpp
+    )
+endif()
+
 configure_file(lib/config.h.in "${CMAKE_CURRENT_BINARY_DIR}/akaze_config.h" @ONLY)
 set(AKAZE_HEADERS ${AKAZE_HEADERS} "${CMAKE_CURRENT_BINARY_DIR}/akaze_config.h")
 if (USE_PYTHON)
@@ -182,30 +192,32 @@ add_library(AKAZE ${AKAZE_HEADERS} ${AKAZE_SRCS})
 #generating and export header that will end up in the binary directory
 generate_export_header(AKAZE)
 
-target_link_libraries(AKAZE Eigen::eigen JPEG::jpeg)
-
+target_link_libraries(AKAZE Eigen3::Eigen JPEG::jpeg)
 set(AKAZE_LIBRARIES ${AKAZE_LIBRARIES} timer)
-
 target_link_libraries(AKAZE ${AKAZE_LIBRARIES})
-
-set(AKAZE_LIBRARIES AKAZE JPEG::jpeg)
+set(AKAZE_LIBRARIES ${AKAZE_LIBRARIES} JPEG::jpeg)
 
 if(AKAZE_USE_CUDA)
-    set(AKAZE_HEADERS ${AKAZE_HEADERS}
-      lib/AKAZE_cuda.h
-    )
-    set(AKAZE_SRCS ${AKAZE_SRCS}
-      lib/AKAZE_cuda.h
-    )
-
   SET(AKAZE_CUDA_SRCS
     lib/cudaImage.cu lib/cuda_akaze.cu)
 
   SET(CUDA_SEPARABLE_COMPILATION ON)
 
-  cuda_add_library(AKAZE_CUDA ${AKAZE_CUDA_SRCS})
-  target_link_libraries(AKAZE_CUDA ${OpenCV_LIBS})
-  set(AKAZE_LIBRARIES AKAZE_CUDA)
+  #cuda code uses __shfl_down which requires compute_30
+  list(APPEND CUDA_NVCC_FLAGS "--gpu-architecture=compute_30")
+
+  get_property(EIGEN_INCLUDE_DIRS TARGET Eigen3::Eigen PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+  cuda_include_directories(${EIGEN_INCLUDE_DIRS})
+  cuda_add_library(AKAZE_CUDA ${AKAZE_CUDA_SRCS} STATIC)
+
+  target_link_libraries(AKAZE_CUDA ${OpenCV_LIBS} Eigen3::Eigen)
+
+if(NOT BUILD_SHARED_LIBS)
+  #for static builds both AKAZE and AKAZE_CUDA need to be added as libs, for shared AKAZE_CUDA should be part of AKAZE lib
+  set(AKAZE_LIBRARIES ${AKAZE_LIBRARIES} AKAZE_CUDA) 
+endif()
+
+  target_link_libraries(AKAZE AKAZE_CUDA)
 endif()
 
 #get_property(AKAZE_Runtime_Directory TARGET AKAZE PROPERTY LOCATION_${CMAKE_BUILD_TYPE})
@@ -215,7 +227,7 @@ endif()
 
 # Feature detector program
 add_executable(akaze_features akaze_features.cpp commandLineHelper.cpp commandLineHelper.h)
-target_link_libraries(akaze_features ${AKAZE_LIBRARIES})
+target_link_libraries(akaze_features ${AKAZE_LIBRARIES} AKAZE)
 create_target_launcher(akaze_features
 	RUNTIME_LIBRARY_DIRS ${AKAZE_Runtime_Directories} 
 )
