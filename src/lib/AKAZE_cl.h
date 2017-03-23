@@ -86,7 +86,8 @@ public:
     /// AKAZE constructor with input options
     /// @param options AKAZE configuration options
     /// @note This constructor allocates memory for the nonlinear scale space
-    AKAZE(cl_context openclContext, cl_command_queue commandQueue, const Options& options);
+//    AKAZE(cl_context openclContext, cl_command_queue commandQueue, const Options& options);
+    AKAZE(::cl::Context openclContext, ::cl::CommandQueue commandQueue, const Options& options);
 
     /// Destructor
     ~AKAZE();
@@ -158,6 +159,16 @@ private:
     ::cl::Buffer evolutionDxy_;
     ::cl::Buffer evolutionDyy_;
     ::cl::Buffer evolutionDet_;
+
+    ::cl::Buffer contrastGuassianScratch_;
+    ::cl::Buffer contrastMagnitudeScratch_;
+    ::cl::Buffer contrastGuassian_;
+    int contrastGuassianSize_;
+    ScharrSeparableKernel contrastScharr_;
+    int contrastScharrSize_;
+    ::cl::Buffer histogramBuffer_;
+    std::vector<int> histogram_;
+    ::cl::Buffer histogramScratchBuffer_;
 
     ::cl::Buffer keypointsBuffer_;
     int keypointsCount_;

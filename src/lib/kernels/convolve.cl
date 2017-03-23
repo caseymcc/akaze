@@ -49,6 +49,33 @@ __kernel void separableConvolveXImage2D(read_only image2d_t input, __constant fl
     write_imagef(output, (int2)(xOutput, yOutput), sum);
 }
 
+//__kernel void separableConvolveXImage2D(read_only image2d_t input, int width, __constant float *kernelX, const int kernelSize, float scale, write_only image2d_t output)
+//{
+//    const sampler_t nearestClampSampler=CLK_NORMALIZED_COORDS_FALSE|CLK_FILTER_NEAREST|CLK_ADDRESS_CLAMP_TO_EDGE;
+//
+//    const int xOutput=get_global_id(0);
+//
+//    float sum=0;
+//    int filterOffset=kernelSize/2;
+//    int xInput=xOutput-filterOffset;
+//
+//    __local float cache[32];
+//    int pos=0;
+//
+//    for(int i=0; i<filterOffset; i++)
+//        cache[pos]=read_imagef(input, nearestClampSampler, (int2)(xInput+x, yOutput)).x;
+//
+//    for(int x=0; x<kernelSize; x++)
+//    {
+//        float value=read_imagef(input, nearestClampSampler, (int2)(xInput+x, yOutput)).x;
+//
+//        sum+=kernelX[x]*value;
+//    }
+//
+//    sum=sum*scale;
+//    write_imagef(output, (int2)(xOutput, yOutput), sum);
+//}
+
 __kernel void separableConvolveXImage2DBuffer(read_only image2d_t input, __constant float *kernelX, const int kernelSize, float scale, __global float *output, int offset, int width, int height)
 {
     const sampler_t nearestClampSampler=CLK_NORMALIZED_COORDS_FALSE|CLK_FILTER_NEAREST|CLK_ADDRESS_CLAMP_TO_EDGE;
@@ -819,35 +846,31 @@ inline void atomicMaxGlobal(volatile __global float *addr, float value)
 
 }
 
-//__kernel void computeOrientation(__global Keypoint *keypoints, __global float *dx, __global float *dy, __global EvolutionInfo *evolution, __local float *localMem)
-__kernel void computeOrientation(__global Keypoint *keypoints, __global float *dx, __global float *dy, __global EvolutionInfo *evolution, __global float *dataBuffer)
+__constant float gauss25[7][7]=
 {
-    __constant float gauss25[7][7]=
-    {
-        { 0.02546481f, 0.02350698f, 0.01849125f, 0.01239505f, 0.00708017f, 0.00344629f, 0.00142946f },
-        { 0.02350698f, 0.02169968f, 0.01706957f, 0.01144208f, 0.00653582f, 0.00318132f, 0.00131956f },
-        { 0.01849125f, 0.01706957f, 0.01342740f, 0.00900066f, 0.00514126f, 0.00250252f, 0.00103800f },
-        { 0.01239505f, 0.01144208f, 0.00900066f, 0.00603332f, 0.00344629f, 0.00167749f, 0.00069579f },
-        { 0.00708017f, 0.00653582f, 0.00514126f, 0.00344629f, 0.00196855f, 0.00095820f, 0.00039744f },
-        { 0.00344629f, 0.00318132f, 0.00250252f, 0.00167749f, 0.00095820f, 0.00046640f, 0.00019346f },
-        { 0.00142946f, 0.00131956f, 0.00103800f, 0.00069579f, 0.00039744f, 0.00019346f, 0.00008024f }
-    };
-    __constant int id[13]={6, 5, 4, 3, 2, 1, 0, 1, 2, 3, 4, 5, 6};
-    __constant int2 points[109]=
-    {
-        {-3, -5},{-2, -5},{-1, -5},{0, -5},{1, -5},{2, -5},{3, -5},
-        {-4, -4},{-3, -4},{-2, -4},{-1, -4},{0, -4},{1, -4},{2, -4},{3, -4},{4, -4},
-        {-5, -3},{-4, -3},{-3, -3},{-2, -3},{-1, -3},{0, -3},{1, -3},{2, -3},{3, -3},{4, -3},{5, -3},
-        {-5, -2},{-4, -2},{-3, -2},{-2, -2},{-1, -2},{0, -2},{1, -2},{2, -2},{3, -2},{4, -2},{5, -2},
-        {-5, -1},{-4, -1},{-3, -1},{-2, -1},{-1, -1},{0, -1},{1, -1},{2, -1},{3, -1},{4, -1},{5, -1},
-        {-5, 0}, {-4, 0}, {-3, 0}, {-2, 0}, {-1, 0}, {0, 0}, {1, 0}, {2, 0}, {3, 0}, {4, 0}, {5, 0},
-        {-5, 1},{-4, 1},{-3, 1},{-2, 1},{-1, 1},{0, 1},{1, 1},{2, 1},{3, 1},{4, 1},{5, 1},
-        {-5, 2},{-4, 2},{-3, 2},{-2, 2},{-1, 2},{0, 2},{1, 2},{2, 2},{3, 2},{4, 2},{5, 2},
-        {-5, 3},{-4, 3},{-3, 3},{-2, 3},{-1, 3},{0, 3},{1, 3},{2, 3},{3, 3},{4, 3},{5, 3},
-        {-4, 4},{-3, 4},{-2, 4},{-1, 4},{0, 4},{1, 4},{2, 4},{3, 4},{4, 4},
-        {-3, 5},{-2, 5},{-1, 5},{0, 5},{1, 5},{2, 5},{3, 5}
-    };
-
+    {0.02546481f, 0.02350698f, 0.01849125f, 0.01239505f, 0.00708017f, 0.00344629f, 0.00142946f},
+    {0.02350698f, 0.02169968f, 0.01706957f, 0.01144208f, 0.00653582f, 0.00318132f, 0.00131956f},
+    {0.01849125f, 0.01706957f, 0.01342740f, 0.00900066f, 0.00514126f, 0.00250252f, 0.00103800f},
+    {0.01239505f, 0.01144208f, 0.00900066f, 0.00603332f, 0.00344629f, 0.00167749f, 0.00069579f},
+    {0.00708017f, 0.00653582f, 0.00514126f, 0.00344629f, 0.00196855f, 0.00095820f, 0.00039744f},
+    {0.00344629f, 0.00318132f, 0.00250252f, 0.00167749f, 0.00095820f, 0.00046640f, 0.00019346f},
+    {0.00142946f, 0.00131956f, 0.00103800f, 0.00069579f, 0.00039744f, 0.00019346f, 0.00008024f}
+};
+__constant int id[13]={6, 5, 4, 3, 2, 1, 0, 1, 2, 3, 4, 5, 6};
+__constant int2 points[109]=
+{
+                      {-3, -5},{-2, -5},{-1, -5},{0, -5},{1, -5},{2, -5},{3, -5},
+             {-4, -4},{-3, -4},{-2, -4},{-1, -4},{0, -4},{1, -4},{2, -4},{3, -4},{4, -4},
+    {-5, -3},{-4, -3},{-3, -3},{-2, -3},{-1, -3},{0, -3},{1, -3},{2, -3},{3, -3},{4, -3},{5, -3},
+    {-5, -2},{-4, -2},{-3, -2},{-2, -2},{-1, -2},{0, -2},{1, -2},{2, -2},{3, -2},{4, -2},{5, -2},
+    {-5, -1},{-4, -1},{-3, -1},{-2, -1},{-1, -1},{0, -1},{1, -1},{2, -1},{3, -1},{4, -1},{5, -1},
+    {-5,  0},{-4,  0},{-3,  0},{-2,  0},{-1,  0},{0,  0},{1,  0},{2,  0},{3,  0},{4,  0},{5,  0},
+    {-5,  1},{-4,  1},{-3,  1},{-2,  1},{-1,  1},{0,  1},{1,  1},{2,  1},{3,  1},{4,  1},{5,  1},
+    {-5,  2},{-4,  2},{-3,  2},{-2,  2},{-1,  2},{0,  2},{1,  2},{2,  2},{3,  2},{4,  2},{5,  2},
+    {-5,  3},{-4,  3},{-3,  3},{-2,  3},{-1,  3},{0,  3},{1,  3},{2,  3},{3,  3},{4,  3},{5,  3},
+             {-4,  4},{-3,  4},{-2,  4},{-1,  4},{0,  4},{1,  4},{2,  4},{3,  4},{4,  4},
+                      {-3,  5},{-2,  5},{-1,  5},{0,  5},{1,  5},{2,  5},{3,  5}
+};
 //    __constant int2 points[109]=
 //    {
 //                          {-5, -3},{-5, -2},{-5, -1},{-5, 0},{-5, 1},{-5, 2},{-5, 3},
@@ -863,7 +886,9 @@ __kernel void computeOrientation(__global Keypoint *keypoints, __global float *d
 //                          { 5, -3},{ 5, -2},{ 5, -1},{ 5, 0},{ 5, 1},{ 5, 2},{ 5, 3}
 //    };
 
-    
+//__kernel void computeOrientation(__global Keypoint *keypoints, __global float *dx, __global float *dy, __global EvolutionInfo *evolution, __local float *localMem)
+__kernel void computeOrientation(__global Keypoint *keypoints, __global float *dx, __global float *dy, __global EvolutionInfo *evolution, __global float *dataBuffer)
+{
 //    __local float *resX=localMem;
 //    __local float *resY=&localMem[109];
 //    __local float *angles=&localMem[109*2];
@@ -1125,4 +1150,80 @@ __kernel void getMLDBDescriptor(__global Keypoint *keypoints, __global unsigned 
         fillValuesMLDB(values, sample_step, keypoint->class_id, xf, yf, co, si, scale, image, dx, dy, width, height, channels, patternSize);
         binaryComparisonsMLDB(values, descriptor, val_count, &dpos, channels);
     }
+}
+
+__kernel void computeContrast(read_only image2d_t input, int width, int height, __constant float *smooth, __constant float *edge, const int kernelSize, write_only image2d_t output, __local float *imageCache, int cacheIndexMax,
+    __local float *dxCache, __local float *dyCache)
+{
+    const int globalX=get_global_id(0);
+    const int globalY=get_global_id(1);
+
+    if((globalX>=width)||(globalY>=height))
+        return;
+  
+    const int localX=get_local_id(0);
+    const int localY=get_local_id(1);
+    const int localXSize=get_local_size(0);
+    const int localYSize=get_local_size(0);
+
+    int cacheIndex=((localY*localXSize)+localX)*2;
+    
+//build up image cache
+    if(cacheIndex < cacheIndexMax)
+    {
+        const int halfKernelSize=kernelSize/2;
+        const int shiftX=(localX*2);
+        const int imageX=globalX-halfKernelSize+shiftX;
+        const int imageY=globalY-halfKernelSize+(localY*2);
+
+        if(shiftX>localXSize)
+        {
+            imageX=imageX-localXSize;
+            imageY++;
+        }
+
+        imageCache[cacheIndex]=read_imagef(input, nearestClampSampler, (int2)(imageX, imageY)).x;
+        imageCache[cacheIndex+1]=read_imagef(input, nearestClampSampler, (int2)(imageX+1, imageY)).x;
+    }
+    
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    const int cacheStride=localXSize+(halfKernelSize*2);
+    const int cacheX=localX+halfKernelSize;
+    const int cacheY=localY+halfKernelSize;
+
+    int cacheXKernel=(cacheY*cacheStride)+localX;
+    int cacheYKernel=(localY*cacheStride)+cacheX;
+    float dx=0;
+    float dy=0;
+
+//calculate first order derivatives
+    //x direction first
+    for(int i=0; i<kernelSize; i++)
+    {
+        dx+=edge[i]*imageCache[cacheXKernel];
+        dy+=smooth[i]*imageCache[cacheXKernel];
+        cacheXKernel++;
+    }
+
+    dxCache[];
+    dyCache[];
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    //now y direction
+    for(int i=0; i<kernelSize; i++)
+    {
+        dx+=smooth[i]*imageCache[cacheYKernel];
+        dy+=edge[i]*imageCache[cacheYKernel];
+        cacheYKernel+=cacheStride;
+    }
+
+    dx=dx*scale;
+    dy=dy*scale;
+
+//calculate magnitude
+    const float value=sqrt(dx*dx+dy*dy);
+
+    write_imagef(output, (int2)(globalX, globalY), value);
 }

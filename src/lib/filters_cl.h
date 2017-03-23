@@ -40,6 +40,8 @@ void gaussianConvolution(::cl::Context context, ::cl::CommandQueue commandQueue,
 ///
 ///
 void gaussianSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, ::cl::Image2D &dst, size_t width, size_t height, float sigma, std::vector<::cl::Event> *events, ::cl::Event &event);
+void gaussianSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, ::cl::Image2D &dst, size_t width, size_t height, ::cl::Buffer kernelBuffer, int kernelSize, ::cl::Image2D scratch,
+    std::vector<::cl::Event> *events, ::cl::Event &event);
 //double lowPass(CudaImage &inimg, CudaImage &outimg, CudaImage &temp, double var, int kernsize);
 
 struct ScharrSeparableKernel
@@ -57,6 +59,9 @@ ScharrSeparableKernel buildScharrSeparableKernel(::cl::Context context, int scal
 ///
 ///
 void scharrSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, int size, float scale, bool yKernel, bool normalize, ::cl::Image2D &dst, std::vector<::cl::Event> *events, ::cl::Event &event);
+void scharrSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, int size, float scale, bool yKernel, bool normalize, ::cl::Image2D &dst,
+    ScharrSeparableKernel &kernelBuffer, int kernelSize, ::cl::Image2D scratch, std::vector<::cl::Event> *events, ::cl::Event &event)
+
 void scharrSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, int size, float scale, bool yKernel, bool normalize, ::cl::Buffer &dst, size_t offset, 
     std::vector<::cl::Event> *events, ::cl::Event &event);
 void scharrSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &src, size_t srcOffset, size_t width, size_t height, int size, float scale, bool yKernel, bool normalize,
@@ -75,11 +80,16 @@ float calculateMax(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl:
 ///
 ///
 std::vector<int> calculateHistogram(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, int bins, float scale, std::vector<::cl::Event> *events, ::cl::Event &event);
+std::vector<int> calculateHistogram(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, int bins, float scale,
+    ::cl::Buffer histogramBuffer, std::vector<int> &histogram, ::cl::Buffer scratchBuffer, std::vector<::cl::Event> *events, ::cl::Event &event);
 
 ///
 ///
 ///
-float computeKPercentile(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, float perc, float gscale, size_t nbins, size_t ksize_x, size_t ksize_y);
+float computeKPercentile(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, float perc, float gscale, size_t nbins);
+float computeKPercentile(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, int width, int height, float perc, size_t nbins,
+    ::cl::Image2D gaussian, ::cl::Image2D magnitude, ::cl::Buffer histogramBuffer, std::vector<int> &histogram, ::cl::Buffer histogramScratchBuffer,
+    ::cl::Buffer guassianKernel, int guassiankernelSize, ScharrSeparableKernel &scharrKernel, int scharrKernelSize, ::cl::Image2D scratch);
 
 ///
 ///

@@ -74,6 +74,9 @@ int main(int argc, char* argv[])
         if(error < 0)
             show_input_options_help(0);
 
+#if(defined(_WINDOWS) && defined(_DEBUG))
+        system("pause");
+#endif
         return -1;
     }
 
@@ -87,6 +90,8 @@ int main(int argc, char* argv[])
     {
         if(akaze_options.type==libAKAZE::Options::Cuda)
         {
+            int retVal=0;
+
 #ifdef AKAZE_USE_CUDA
             std::vector<libAKAZE::cuda::CudaDevice> devices=libAKAZE::cuda::getDevices();
 
@@ -94,15 +99,18 @@ int main(int argc, char* argv[])
             {
                 cout<<"Device: "<<device.name<<endl;
             }
-
-            return 0;
 #else
             cerr<<"Error: Cuda not supported in build"<<endl;
-            return -1;
+            retVal=-1;
 #endif
+#if(defined(_WINDOWS) && defined(_DEBUG))
+            system("pause");
+#endif
+            return retVal;
         }
         else if(akaze_options.type==libAKAZE::Options::OpenCL)
         {
+            int retVal=0;
 #ifdef AKAZE_USE_OPENCL
             std::vector<libAKAZE::cl::OpenClDevice> devices=libAKAZE::cl::getDevices();
 
@@ -112,16 +120,23 @@ int main(int argc, char* argv[])
                 cout<<"  Type: "<<((device.type==libAKAZE::cl::OpenClDevice::GPU)?"GPU":"CPU")<<endl;
                 cout<<"  Version: "<<device.version<<endl;
             }
-
-            return 0;
 #else
             cerr<<"Error: OpenCL not supported in build"<<endl;
-            return -1;
+            retVal=-1;
 #endif // AKAZE_USE_OPENCL
+
+#if(defined(_WINDOWS) && defined(_DEBUG))
+            system("pause");
+#endif
+            return retVal;
         }
         else
         {
             cerr<<"Error: --devices not supported for Standard processing"<<endl;
+
+#if(defined(_WINDOWS) && defined(_DEBUG))
+            system("pause");
+#endif
             return -1;
         }
     }
@@ -142,6 +157,9 @@ int main(int argc, char* argv[])
         break;
     }
 
+#if(defined(_WINDOWS) && defined(_DEBUG))
+    system("pause");
+#endif
     return value;
 }
 
@@ -266,84 +284,91 @@ int featuresOpenCL(ProgramOptions &options, libAKAZE::Options &akaze_options)
 
     akaze_options.img_width=img_32.cols();
     akaze_options.img_height=img_32.rows();
-    
+
     ::cl::Context openClContext;
+    libAKAZE::cl::OpenClDevice deviceInfo;
 
     if(!options.device.empty())
     {
         if(!options.platform.empty())
-            openClContext=libAKAZE::cl::openDevice(options.platform, options.device);
+            openClContext=libAKAZE::cl::openDevice(options.platform, options.device, deviceInfo);
         else
-            openClContext=libAKAZE::cl::openDevice(options.device);
+            openClContext=libAKAZE::cl::openDevice(options.device, deviceInfo);
     }
     else
-        openClContext=libAKAZE::cl::openDevice();
+    {
+        openClContext=libAKAZE::cl::openDevice(deviceInfo);
+    }
 
-    if(openClContext() == nullptr)
+    if(openClContext()==nullptr)
         return 1;
+
+    cout<<"Device: "<<deviceInfo.name<<" ("<<deviceInfo.platform<<", "<<deviceInfo.vendor<<")"<<endl;
+    cout<<"  Type: "<<((deviceInfo.type==libAKAZE::cl::OpenClDevice::GPU)?"GPU":"CPU")<<endl;
+    cout<<"  Version: "<<deviceInfo.version<<endl;
 
     ::cl::CommandQueue commandQueue(openClContext);
 
     vector<libAKAZE::Keypoint> kpts;
-    libAKAZE::cl::AKAZE evolution(openClContext(), commandQueue(), akaze_options);
+    libAKAZE::cl::AKAZE evolution(openClContext, commandQueue, akaze_options);
     libAKAZE::Descriptors desc;
-
+        
     evolution.initOpenCL(); //gets some items loaded early
-
+        
     timer.reset();
     if(!options.scale_space_directory.empty()&&!options.save_scale_space)
         evolution.Load_Nonlinear_Scale_Space(options.scale_space_directory);
     else
     {
         evolution.Create_Nonlinear_Scale_Space(img_32);
-
+        
         if(options.save_scale_space)
             evolution.Save_Nonlinear_Scale_Space(options.scale_space_directory);
     }
-
+        
     evolution.Feature_Detection(kpts);
-//    if(!options.det_hessian_response_directory.empty()&&!options.save_det_hessian_response)
-//    {
-//        evolution.Load_Derivatives(options.det_hessian_response_directory);
-//        evolution.Load_Determinant_Hessian_Response(options.det_hessian_response_directory);
-//    }
-//    else
-//    {
-//        evolution.Compute_Determinant_Hessian_Response();
-//
-//        if(options.save_det_hessian_response)
-//        {
-//            evolution.Save_Derivatives(options.det_hessian_response_directory);
-//            evolution.Save_Determinant_Hessian_Response(options.det_hessian_response_directory);
-//        }
-//    }
-//
-//    if(!options.keypoints_data_path.empty() && !options.save_keypoints)
-//    {
-//        evolution.Load_Keypoints(options.keypoints_data_path);
-//    }
-//    else
-//    {
-////        evolution.Find_Scale_Space_Extrema(kpts);
-//        evolution.Find_Scale_Space_Extrema();
-//
-//        if(options.save_keypoints)
-//            evolution.Save_Keypoints(options.keypoints_data_path);
-//    }
-
+    //    if(!options.det_hessian_response_directory.empty()&&!options.save_det_hessian_response)
+    //    {
+    //        evolution.Load_Derivatives(options.det_hessian_response_directory);
+    //        evolution.Load_Determinant_Hessian_Response(options.det_hessian_response_directory);
+    //    }
+    //    else
+    //    {
+    //        evolution.Compute_Determinant_Hessian_Response();
+    //
+    //        if(options.save_det_hessian_response)
+    //        {
+    //            evolution.Save_Derivatives(options.det_hessian_response_directory);
+    //            evolution.Save_Determinant_Hessian_Response(options.det_hessian_response_directory);
+    //        }
+    //    }
+    //
+    //    if(!options.keypoints_data_path.empty() && !options.save_keypoints)
+    //    {
+    //        evolution.Load_Keypoints(options.keypoints_data_path);
+    //    }
+    //    else
+    //    {
+    ////        evolution.Find_Scale_Space_Extrema(kpts);
+    //        evolution.Find_Scale_Space_Extrema();
+    //
+    //        if(options.save_keypoints)
+    //            evolution.Save_Keypoints(options.keypoints_data_path);
+    //    }
+        
     evolution.Compute_Descriptors(desc);
-
+        
     totalTime=timer.elapsedMs();
-
+        
     evolution.getKeypoints(kpts);
-
+        
     std::cout<<"Number of points: "<<kpts.size()<<std::endl;
     evolution.Show_Computation_Times();
     std::cout<<"Total Time: "<<totalTime<<std::endl;
-
+        
     std::string fileName="../output/keypoints_cl.txt";
     save_keypoints_json(fileName, kpts, desc, true);
-
+        
     cimg_library::CImg<float> rgb_image=
         img.get_resize(img.width(), img.height(), img.depth(), 3);
     draw_keypoints_vector(rgb_image, kpts);

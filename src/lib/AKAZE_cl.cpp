@@ -22,7 +22,8 @@ namespace cl
 {
 
 /* ************************************************************************* */
-AKAZE::AKAZE(cl_context openclContext, cl_command_queue commandQueue, const Options& options):
+//AKAZE::AKAZE(cl_context openclContext, cl_command_queue commandQueue, const Options& options):
+AKAZE::AKAZE(::cl::Context openclContext, ::cl::CommandQueue commandQueue, const Options& options):
     options_(options),
     openclContext_(openclContext),
     commandQueue_(commandQueue)
@@ -152,11 +153,13 @@ void AKAZE::Allocate_Memory_Evolution()
     }
 
     event.wait();
-}
 
-void writeImage()
-{
+    contrastGuassian_=buildGaussianKernel(context, commandQueue, 1.0, contrastGuassianSize_);
+    contrastScharr_=buildScharrSeparableKernel(context, 1, contrastScharrSize_, normalize);
 
+    histogram_.resize(nbins);
+    histogramBuffer_=::cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(cl_float)*histogram.size(), histogram.data());
+    histogramScratchBuffer_=::cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(cl_int)*evolution_[0].height*options_.kcontrast_nbins);
 }
 
 int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
@@ -190,16 +193,20 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
     commandQueue_.enqueueWriteImage(evolution_[0].image, CL_FALSE, origin, region, 0, 0, (void *)image.data(), nullptr, &imageEvent);
     events.push_back(imageEvent);
 
-    imageEvent.wait();
+//    imageEvent.wait();
 
     gaussianSeparable(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].smooth, image.cols(), image.rows(), options_.soffset, &events, guassEvent);
 //    guassEvent.wait();
     events.push_back(guassEvent);
+    commandQueue_.enqueueCopyImage(evolution_[0].smooth, evolution_[0].image, origin, origin, region, &events, &copyEvent);
 
-    float kcontrast=computeKPercentile(openclContext_, commandQueue_, evolution_[0].image, options_.kcontrast_percentile, 1.0, options_.kcontrast_nbins, 0, 0);
+//    float kcontrast=computeKPercentile(openclContext_, commandQueue_, evolution_[0].image, options_.kcontrast_percentile, 1.0, options_.kcontrast_nbins, 0, 0);
+    float kcontrast=computeKPercentile(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].width, evolution_[0].height, options_.kcontrast_percentile, options_.kcontrast_nbins,
+        contrastGuassianScratch_, contrastMagnitudeScratch_, histogramBuffer_, histogram_, histogramScratchBuffer_, contrastGuassian_, contrastGuassianSize_, contrastScharr_, contrastScharrSize_,
+        evolution_[0].scratch);
+
     timing_.kcontrast=timer.elapsedMs();
 
-    commandQueue_.enqueueCopyImage(evolution_[0].smooth, evolution_[0].image, origin, origin, region, &events, &copyEvent);
     copyEvent.wait();
 
     for(size_t i=1; i<evolution_.size(); i++)
@@ -273,11 +280,11 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
             evolution_[i].image=evolution_[i].step;
             evolution_[i].step=tempImage;
 
-            stepEvent.wait();
+//            stepEvent.wait();
             stepWait[0]=stepEvent;
         }
 
-        stepWait[0].wait();
+//        stepWait[0].wait();
     }
 
 

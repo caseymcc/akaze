@@ -23,6 +23,13 @@ typedef std::unordered_map<std::string, ::cl::Program> ProgramMap;
 class OpenCLContext
 {
 public:
+    OpenCLContext() {}
+    ~OpenCLContext()
+    {
+        kernels.clear();
+        programs.clear();
+    }
+
     std::vector<::cl::Device> devices;
     ::cl::Context context;
 
@@ -139,6 +146,54 @@ OpenCLContext *getOpenClContext(::cl::Context context)
     return kernel;
 }
 
+void getDeviceInfo(::cl::Platform platform, ::cl::Device device, OpenClDevice &deviceInfo)
+{
+    std::string platformName;
+    std::string vendor;
+    std::string version;
+    cl_platform_id platformId;
+    cl_device_type deviceType;
+
+    platform.getInfo(CL_PLATFORM_NAME, &platformName);
+
+    //platformName can be null-terminated
+    if(platformName.back()==0)
+        platformName.pop_back();
+
+    //trim white space
+    platformName.erase(platformName.find_last_not_of(" \n\r\t\0")+1);
+
+    platform.getInfo(CL_PLATFORM_VENDOR, &vendor);
+    platform.getInfo(CL_PLATFORM_VERSION, &version);
+
+    deviceInfo.deviceId=device();
+
+    deviceInfo.platform=platformName;
+    deviceInfo.vendor=vendor;
+    deviceInfo.version=version;
+
+    device.getInfo(CL_DEVICE_TYPE, &deviceType);
+    device.getInfo(CL_DEVICE_NAME, &deviceInfo.name);
+    device.getInfo(CL_DEVICE_PLATFORM, &platformId);
+
+    //device name can be null-terminated
+    if(deviceInfo.name.back()==0)
+        deviceInfo.name.pop_back();
+
+    //trim white space
+    deviceInfo.name.erase(deviceInfo.name.find_last_not_of(" \n\r\t\0")+1);
+
+    switch(deviceType)
+    {
+    case CL_DEVICE_TYPE_CPU:
+        deviceInfo.type=OpenClDevice::CPU;
+        break;
+    case CL_DEVICE_TYPE_GPU:
+        deviceInfo.type=OpenClDevice::GPU;
+        break;
+    }
+}
+
 std::vector<OpenClDevice> getDevices()
 {
     std::vector<::cl::Platform> platforms;
@@ -172,34 +227,34 @@ std::vector<OpenClDevice> getDevices()
         for(::cl::Device &device:platformDevices)
         {
             OpenClDevice deviceInfo;
-            cl_device_type deviceType;
-
-            deviceInfo.deviceId=device();
-            
-            deviceInfo.platform=platformName;
-            deviceInfo.vendor=vendor;
-            deviceInfo.version=version;
-
-            device.getInfo(CL_DEVICE_TYPE, &deviceType);
-            device.getInfo(CL_DEVICE_NAME, &deviceInfo.name);
-
-            //device name can be null-terminated
-            if(deviceInfo.name.back()==0)
-                deviceInfo.name.pop_back();
-
-            //trim white space
-            deviceInfo.name.erase(deviceInfo.name.find_last_not_of(" \n\r\t\0")+1);
-
-            switch(deviceType)
-            {
-            case CL_DEVICE_TYPE_CPU:
-                deviceInfo.type=OpenClDevice::CPU;
-                break;
-            case CL_DEVICE_TYPE_GPU:
-                deviceInfo.type=OpenClDevice::GPU;
-                break;
-            }
-
+//            cl_device_type deviceType;
+//
+//            deviceInfo.deviceId=device();
+//            
+//            deviceInfo.platform=platformName;
+//            deviceInfo.vendor=vendor;
+//            deviceInfo.version=version;
+//
+//            device.getInfo(CL_DEVICE_TYPE, &deviceType);
+//            device.getInfo(CL_DEVICE_NAME, &deviceInfo.name);
+//
+//            //device name can be null-terminated
+//            if(deviceInfo.name.back()==0)
+//                deviceInfo.name.pop_back();
+//
+//            //trim white space
+//            deviceInfo.name.erase(deviceInfo.name.find_last_not_of(" \n\r\t\0")+1);
+//
+//            switch(deviceType)
+//            {
+//            case CL_DEVICE_TYPE_CPU:
+//                deviceInfo.type=OpenClDevice::CPU;
+//                break;
+//            case CL_DEVICE_TYPE_GPU:
+//                deviceInfo.type=OpenClDevice::GPU;
+//                break;
+//            }
+            getDeviceInfo(platform, device, deviceInfo);
             devices.push_back(deviceInfo);
         }
     }
@@ -207,7 +262,7 @@ std::vector<OpenClDevice> getDevices()
     return devices;
 }
 
-::cl::Context openDevice(OpenClDevice &device)
+::cl::Context openDevice(OpenClDevice &deviceInfo)
 {
     //user has asked us to get a device, lets assume they wanted a GPU so lets try that first and if no device exists
     //then return first available CPU
@@ -233,6 +288,8 @@ std::vector<OpenClDevice> getDevices()
 
             ::cl::Context context(device);
 
+            getDeviceInfo(platform, device, deviceInfo);
+
             checkInfo(device);
             return context;
         }
@@ -242,6 +299,7 @@ std::vector<OpenClDevice> getDevices()
         {
             ::cl::Context context(device);
 
+            getDeviceInfo(platform, device, deviceInfo);
             checkInfo(device);
             return context;
         }
@@ -250,7 +308,7 @@ std::vector<OpenClDevice> getDevices()
     return ::cl::Context();
 }
 
-::cl::Context openDevice(std::string deviceName)
+::cl::Context openDevice(std::string deviceName, OpenClDevice &deviceInfo)
 {
     std::vector<::cl::Platform> platforms;
     ::cl::Platform::get(&platforms);
@@ -280,6 +338,9 @@ std::vector<OpenClDevice> getDevices()
             {
                 deviceId=device();
                 found=true;
+
+                getDeviceInfo(platform, device, deviceInfo);
+
                 break;
             }
         }
@@ -299,7 +360,7 @@ std::vector<OpenClDevice> getDevices()
     return context;
 }
 
-::cl::Context openDevice(std::string platformName, std::string deviceName)
+::cl::Context openDevice(std::string platformName, std::string deviceName, OpenClDevice &deviceInfo)
 {
     std::vector<::cl::Platform> platforms;
     ::cl::Platform::get(&platforms);
@@ -344,6 +405,9 @@ std::vector<OpenClDevice> getDevices()
             {
                 deviceId=device();
                 found=true;
+                
+                getDeviceInfo(platform, device, deviceInfo);
+                
                 break;
             }
         }

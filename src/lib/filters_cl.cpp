@@ -250,6 +250,12 @@ void gaussianSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, :
     separableConvolve(context, commandQueue, src, width, height, kernelBuffer, kernelSize, kernelBuffer, kernelSize, 1.0, dst, scratch, events, event);
 }
 
+void gaussianSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, ::cl::Image2D &dst, size_t width, size_t height, ::cl::Buffer kernelBuffer, int kernelSize, ::cl::Image2D scratch, 
+    std::vector<::cl::Event> *events, ::cl::Event &event)
+{
+    separableConvolve(context, commandQueue, src, width, height, kernelBuffer, kernelSize, kernelBuffer, kernelSize, 1.0, dst, scratch, events, event);
+}
+
 ::cl::Buffer buildScharrFilter(::cl::Context context, int scale)
 {
     ::cl::Buffer kernel;
@@ -357,12 +363,16 @@ void scharrSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, ::c
 {
     int kernelSize;
     ScharrSeparableKernel kernelBuffer=buildScharrSeparableKernel(context, size, kernelSize, normalize);
-    cl_image_format format;
-
-    src.getImageInfo(CL_IMAGE_FORMAT, &format);
 
     ::cl::Image2D scratch(context, CL_MEM_READ_WRITE, ::cl::ImageFormat(format.image_channel_order, format.image_channel_data_type), width, height);
 
+    scharrSeparable(context, commandQueue, src, width, height, size, scale, yKernel, normalize, dst,
+        kernelBuffer, kernelSize, scratch events, event)
+}
+
+void scharrSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, int size, float scale, bool yKernel, bool normalize, ::cl::Image2D &dst, 
+    ScharrSeparableKernel &kernelBuffer, int kernelSize, ::cl::Image2D scratch, std::vector<::cl::Event> *events, ::cl::Event &event)
+{
     if(yKernel)
         separableConvolve(context, commandQueue, src, width, height, kernelBuffer.smooth, kernelSize, kernelBuffer.edge, kernelSize, scale, dst, scratch, events, event);
     else
@@ -494,9 +504,17 @@ float calculateMax(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl:
 std::vector<int> calculateHistogram(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, int bins, float scale, std::vector<::cl::Event> *events, ::cl::Event &event)
 {
     std::vector<int> histogram(bins);
+    
     ::cl::Buffer histogramBuffer(context, CL_MEM_WRITE_ONLY, sizeof(cl_int)*histogram.size());// , histogram.data());
     ::cl::Buffer scratchBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_int)*height*bins);
 
+    return calculateHistogram(context, commandQueue, src, width, height, bins, scale,
+        histogramBuffer, histogram, scratchBuffer, events, event);
+}
+
+std::vector<int> calculateHistogram(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, int bins, float scale, 
+    ::cl::Buffer histogramBuffer, std::vector<int> &histogram, ::cl::Buffer scratchBuffer, std::vector<::cl::Event> *events, ::cl::Event &event)
+{
     ::cl::Kernel kernelHistogramRows=getKernel(context, "histogramRows", "lib/kernels/convolve.cl");
     ::cl::Kernel kernelHistogramCombine=getKernel(context, "histogramCombine", "lib/kernels/convolve.cl");
 
@@ -558,11 +576,26 @@ std::vector<int> calculateHistogram(::cl::Context context, ::cl::CommandQueue co
     return histogram;
 }
 
-float computeKPercentile(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, float perc, float gscale, size_t nbins, size_t ksize_x, size_t ksize_y)
+void computeContrast(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Image2D &dst)
 {
-    size_t nbin=0, nelements=0, nthreshold=0, k=0;
-    float kperc=0.0, modg=0.0, npoints=0.0, hmax=0.0;
+    ::cl::Kernel kernel=getKernel(context, "computeContrast", "lib/kernels/convolve.cl");
+    cl_int status;
+    int index=0;
 
+    status=kernel.setArg(index++, src);
+    status=kernel.setArg(index++, (int)width);
+    status=kernel.setArg(index++, (int)height);
+    status=kernel.setArg(index++, dst);
+
+    ::cl::NDRange globalThreads(width, height);
+
+    status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
+
+    commandQueue.flush();
+}
+
+float computeKPercentile(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, float perc, float gscale, size_t nbins)
+{
     size_t width, height;
     cl_image_format format;
 
@@ -571,28 +604,46 @@ float computeKPercentile(::cl::Context context, ::cl::CommandQueue commandQueue,
     src.getImageInfo(CL_IMAGE_FORMAT, &format);
 
     ::cl::Image2D gaussian(context, CL_MEM_READ_WRITE, ::cl::ImageFormat(format.image_channel_order, format.image_channel_data_type), width, height);
-    ::cl::Image2D lx(context, CL_MEM_READ_WRITE, ::cl::ImageFormat(format.image_channel_order, format.image_channel_data_type), width, height);
-    ::cl::Image2D ly(context, CL_MEM_READ_WRITE, ::cl::ImageFormat(format.image_channel_order, format.image_channel_data_type), width, height);
     ::cl::Image2D magnitude(context, CL_MEM_READ_WRITE, ::cl::ImageFormat(format.image_channel_order, format.image_channel_data_type), width, height);
+    ::cl::Image2D scratch(context, CL_MEM_READ_WRITE, ::cl::ImageFormat(format.image_channel_order, format.image_channel_data_type), width, height);
 
-    std::vector<float> histogram(nbins);
-    ::cl::Buffer histogramBuffer(context, CL_MEM_READ_ONLY|CL_MEM_USE_HOST_PTR, sizeof(cl_float)*histogram.size(), histogram.data());
+    int kernelSize;
+
+    ::cl::Buffer kernelBuffer=buildGaussianKernel(context, commandQueue, gscale, kernelSize);
+
+    std::vector<int> histogram(nbins);
+    ::cl::Buffer histogramBuffer(context, CL_MEM_READ_ONLY|CL_MEM_USE_HOST_PTR, sizeof(cl_int)*histogram.size(), histogram.data());
+    ::cl::Buffer histogramScratchBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_int)*height*nbins);
+    
+    return computeKPercentile(context, commandQueue, src, perc, nbins, ksize_x, ksize_y, gaussian, magnitude,
+        histogramBuffer, histogram, histogramScratchBuffer, guassianKernel, kernelSize, scratch);
+
+}
+
+float computeKPercentile(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, int width, int height, float perc, size_t nbins,
+    ::cl::Image2D gaussian, ::cl::Image2D magnitude, ::cl::Buffer histogramBuffer, std::vector<int> &histogram, ::cl::Buffer histogramScratchBuffer,
+    ::cl::Buffer guassianKernel, int guassiankernelSize, ScharrSeparableKernel &scharrKernel, int scharrKernelSize, ::cl::Image2D scratch)
+{
+    size_t nbin=0, nelements=0, nthreshold=0, k=0;
+    float kperc=0.0, modg=0.0, npoints=0.0, hmax=0.0;
 
     ::cl::Event guassianEvent;
     
     // Perform the Gaussian convolution
-    gaussianSeparable(context, commandQueue, src, gaussian, width, height, gscale, nullptr, guassianEvent);
+//    gaussianSeparable(context, commandQueue, src, gaussian, width, height, gscale, nullptr, guassianEvent);
+    gaussianSeparable(context, commandQueue, src, gaussian, width, height, guassianKernel, kernelSize, scratch, nullptr, guassianEvent);
 
     std::vector<::cl::Event> waitEvent={guassianEvent};
     std::vector<::cl::Event> derivativeEvent(2);
 
-    // Compute the Gaussian derivatives Lx and Ly
-    scharrSeparable(context, commandQueue, gaussian, width, height, 1, 1.0, false, false, lx, &waitEvent, derivativeEvent[0]);
-    scharrSeparable(context, commandQueue, gaussian, width, height, 1, 1.0, true, false, ly, &waitEvent, derivativeEvent[1]);
-
-    // Calculate magnitude
-    ::cl::Event combinedEvent;
-    calculateMagnitude(context, commandQueue, lx, ly, magnitude, width, height, &derivativeEvent, combinedEvent);
+//    // Compute the Gaussian derivatives Lx and Ly
+//    scharrSeparable(context, commandQueue, gaussian, width, height, 1, 1.0, false, false, lx, scharrKernel, scharrKernelSize, &waitEvent, derivativeEvent[0]);
+//    scharrSeparable(context, commandQueue, gaussian, width, height, 1, 1.0, true, false, ly, scharrKernel, scharrKernelSize, &waitEvent, derivativeEvent[1]);
+//
+//    // Calculate magnitude
+//    ::cl::Event combinedEvent;
+//    calculateMagnitude(context, commandQueue, lx, ly, magnitude, width, height, &derivativeEvent, combinedEvent);
+    computeContrast(context, commandQueue, gaussian, width, height, magnitude, waitEvent, combinedEvent);
 
     // Get the maximum from the magnitude
     std::vector<::cl::Event> combinedWaitEvent={combinedEvent};
@@ -603,7 +654,8 @@ float computeKPercentile(::cl::Context context, ::cl::CommandQueue commandQueue,
 
     //Create scaled histogram using nbins and max of magnitude
     float maxScale=1/hmax;
-    std::vector<int> hist=calculateHistogram(context, commandQueue, magnitude, width, height, nbins, maxScale, nullptr, histogramEvent);
+    std::vector<int> hist=calculateHistogram(context, commandQueue, magnitude, width, height, nbins, maxScale, histogramBuffer, histogram, histogramScratchBuffer,
+        nullptr, histogramEvent);
 
     for(size_t i=0; i<hist.size(); ++i)
         npoints+=hist[i];
