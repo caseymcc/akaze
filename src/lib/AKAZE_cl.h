@@ -9,6 +9,8 @@
 #ifdef AKAZE_USE_OPENCL
 
 #include <CL/cl.hpp>
+#include <memory>
+#include "filters_cl.h"
 
 /* ************************************************************************* */
 namespace libAKAZE
@@ -78,6 +80,9 @@ struct EvolutionCL:Evolution
 
     ::cl::Buffer det; //Detector response
 };
+
+struct KernelInfo;
+typedef std::shared_ptr<KernelInfo> SharedKernelInfo;
 
 class AKAZE_EXPORT AKAZE//:public libAKAZE::AKAZE
 {
@@ -160,8 +165,8 @@ private:
     ::cl::Buffer evolutionDyy_;
     ::cl::Buffer evolutionDet_;
 
-    ::cl::Buffer contrastGuassianScratch_;
-    ::cl::Buffer contrastMagnitudeScratch_;
+    ::cl::Image2D contrastGuassianScratch_;
+    ::cl::Image2D contrastMagnitudeScratch_;
     ::cl::Buffer contrastGuassian_;
     int contrastGuassianSize_;
     ScharrSeparableKernel contrastScharr_;
@@ -178,6 +183,7 @@ private:
 
     ::cl::Buffer extremaMap_;
     
+    SharedKernelInfo contrastKernel_;
 };
 
 }}//namespace libAkaze::cl

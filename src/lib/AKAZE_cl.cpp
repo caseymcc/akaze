@@ -68,6 +68,8 @@ void AKAZE::initOpenCL()
     kernel=getKernel(openclContext_, "subPixelRefinement", "lib/kernels/convolve.cl");
     kernel=getKernel(openclContext_, "computeOrientation", "lib/kernels/convolve.cl");
     kernel=getKernel(openclContext_, "getMLDBDescriptor", "lib/kernels/convolve.cl");
+
+    kernel=getKernel(openclContext_, "computeContrast", "lib/kernels/contrast.cl");
 }
 
 void AKAZE::Allocate_Memory_Evolution()
@@ -154,12 +156,20 @@ void AKAZE::Allocate_Memory_Evolution()
 
     event.wait();
 
-    contrastGuassian_=buildGaussianKernel(context, commandQueue, 1.0, contrastGuassianSize_);
-    contrastScharr_=buildScharrSeparableKernel(context, 1, contrastScharrSize_, normalize);
+    contrastGuassian_=buildGaussianKernel(openclContext_, commandQueue_, 1.0, contrastGuassianSize_);
+    contrastScharr_=buildScharrSeparableKernel(openclContext_, 1, contrastScharrSize_, false);
 
-    histogram_.resize(nbins);
-    histogramBuffer_=::cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(cl_float)*histogram.size(), histogram.data());
-    histogramScratchBuffer_=::cl::Buffer(context, CL_MEM_READ_WRITE, sizeof(cl_int)*evolution_[0].height*options_.kcontrast_nbins);
+    histogram_.resize(options_.kcontrast_nbins);
+    histogramBuffer_=::cl::Buffer(openclContext_, CL_MEM_READ_WRITE, sizeof(cl_float)*histogram_.size());
+
+    commandQueue_.enqueueWriteBuffer(histogramBuffer_, CL_FALSE, 0, histogram_.size()*sizeof(cl_float), histogram_.data(), nullptr, &event);
+
+    histogramScratchBuffer_=::cl::Buffer(openclContext_, CL_MEM_READ_WRITE, sizeof(cl_int)*evolution_[0].height*options_.kcontrast_nbins);
+
+    contrastGuassianScratch_=::cl::Image2D(openclContext_, CL_MEM_READ_WRITE, ::cl::ImageFormat(CL_R, CL_FLOAT), evolution_[0].width, evolution_[0].height);
+    contrastMagnitudeScratch_=::cl::Image2D(openclContext_, CL_MEM_READ_WRITE, ::cl::ImageFormat(CL_R, CL_FLOAT), evolution_[0].width, evolution_[0].height);
+
+    event.wait();
 }
 
 int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
@@ -202,8 +212,7 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
 
 //    float kcontrast=computeKPercentile(openclContext_, commandQueue_, evolution_[0].image, options_.kcontrast_percentile, 1.0, options_.kcontrast_nbins, 0, 0);
     float kcontrast=computeKPercentile(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].width, evolution_[0].height, options_.kcontrast_percentile, options_.kcontrast_nbins,
-        contrastGuassianScratch_, contrastMagnitudeScratch_, histogramBuffer_, histogram_, histogramScratchBuffer_, contrastGuassian_, contrastGuassianSize_, contrastScharr_, contrastScharrSize_,
-        evolution_[0].scratch);
+        contrastGuassianScratch_, contrastMagnitudeScratch_, histogramBuffer_, histogram_, histogramScratchBuffer_, contrastGuassian_, contrastGuassianSize_, evolution_[0].scratch);
 
     timing_.kcontrast=timer.elapsedMs();
 

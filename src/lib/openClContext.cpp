@@ -8,16 +8,17 @@
 
 #include "cimg/CImg.h"
 
+#include <memory>
+
 namespace libAKAZE
 {
 namespace cl
 {
 
 void checkInfo(::cl::Device device);
+void getDeviceInfo(::cl::Device device, OpenClDevice &deviceInfo);
 
-//typedef std::unordered_map<std::string, ::cl::Kernel::cl_type> KernelMap;
-//typedef std::unordered_map<std::string, ::cl::Program::cl_type> ProgramMap;
-typedef std::unordered_map<std::string, ::cl::Kernel> KernelMap;
+typedef std::unordered_map<std::string, SharedKernelInfo> KernelMap;
 typedef std::unordered_map<std::string, ::cl::Program> ProgramMap;
 
 class OpenCLContext
@@ -30,8 +31,11 @@ public:
         programs.clear();
     }
 
-    std::vector<::cl::Device> devices;
+//    std::vector<::cl::Device> devices;
+    ::cl::Device device;
     ::cl::Context context;
+    
+    OpenClDevice deviceInfo;
 
     KernelMap kernels;
     ProgramMap programs;
@@ -48,10 +52,18 @@ OpenCLContext *getOpenClContext(::cl::Context context)
     if(iter!=s_openCLContext.end())
         return iter->second.get();
 
-    SharedOpenCLContext openCLContext(new OpenCLContext);
+    SharedOpenCLContext openCLContext=std::make_shared<OpenCLContext>();
 
     openCLContext->context=context;
-    context.getInfo(CL_CONTEXT_DEVICES, &openCLContext->devices);
+
+    std::vector<::cl::Device> devices;
+
+    context.getInfo(CL_CONTEXT_DEVICES, &devices);
+
+    //assuming only 1 device in use
+    openCLContext->device=devices[0];
+    getDeviceInfo(openCLContext->device, openCLContext->deviceInfo);
+
     s_openCLContext.insert({context(), openCLContext});
 
     return openCLContext.get();
@@ -94,19 +106,38 @@ OpenCLContext *getOpenClContext(::cl::Context context)
     ::cl::Program program=::cl::Program(context, programSource);
 
     cl_int error;
+    std::vector<::cl::Device> devices(1);
+    
+    devices[0]=openCLContext->device;
 
 #if !defined(NDEBUG)
-//    error=program.build(openCLContext->devices, "-g -s C:/projects/akaze/src/lib/kernels/convolve.cl");
-    error=program.build(openCLContext->devices, "");
+    std::string buildCommandline="-g";
+
+#ifdef LINUX
+    char path[PATH_MAX];
+
+    realpath(fileName.c_str(), path);
+    buildCommandline+=" -s ";
+    buildCommandline+=path;
+#endif
+#if _WINDOWS
+    char path[_MAX_PATH];
+
+    _fullpath(path, fileName.c_str(), _MAX_PATH);
+    buildCommandline+=" -s ";
+    buildCommandline+=path;
+#endif
+//    error=program.build(devices, buildCommandline.c_str());
+    error=program.build(devices, "");
 #else
-    error=program.build(openCLContext->devices);
+    error=program.build(devices);
 #endif
 
     if(error!=CL_SUCCESS)
     {
         if(error==CL_BUILD_PROGRAM_FAILURE)
         {
-            std::string str=program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(openCLContext->devices[0]);
+            std::string str=program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(openCLContext->device);
 
             printf(" \n\t\t\tBUILD LOG\n");
             printf(" ************************************************\n");
@@ -124,35 +155,59 @@ OpenCLContext *getOpenClContext(::cl::Context context)
 
 ::cl::Kernel getKernel(::cl::Context context, std::string kernelName, std::string fileName)
 {
+    SharedKernelInfo kernelInfo=getKernelInfo(context, kernelName, fileName);
+
+    if(kernelInfo)
+        return kernelInfo->kernel;
+
+    return ::cl::Kernel();
+}
+
+SharedKernelInfo getKernelInfo(::cl::Context context, std::string kernelName, std::string fileName)
+{
     OpenCLContext *openCLContext=getOpenClContext(context);
 
-    if(openCLContext == nullptr)
-        return ::cl::Kernel();
+    if(openCLContext==nullptr)
+        return SharedKernelInfo();
 
     KernelMap &kernels=openCLContext->kernels;
 
     KernelMap::iterator iter=kernels.find(kernelName);
 
     if(iter!=kernels.end())
-        return ::cl::Kernel(iter->second);
+        return iter->second;
 
     ::cl::Program program=getProgram(context, fileName);
-    
+
+    SharedKernelInfo kernelInfo=std::make_shared<KernelInfo>();
+
     cl_int error;
-    ::cl::Kernel kernel(program, kernelName.c_str(), &error);
+    kernelInfo->kernel=::cl::Kernel(program, kernelName.c_str(), &error);
 
-    kernels.insert({kernelName, kernel});
+    kernelInfo->kernel.getWorkGroupInfo(openCLContext->device, CL_KERNEL_WORK_GROUP_SIZE, &kernelInfo->workGroupSize);
+    kernelInfo->kernel.getWorkGroupInfo(openCLContext->device, CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE, &kernelInfo->preferredWorkGroupMultiple);
+    kernelInfo->kernel.getWorkGroupInfo(openCLContext->device, CL_KERNEL_LOCAL_MEM_SIZE, &kernelInfo->localMemoryUsed);
 
-    return kernel;
+    //compying info so it is available when setting up kernel call
+    kernelInfo->deviceComputeUnits=openCLContext->deviceInfo.computeUnits;
+    kernelInfo->deviceLocalMemory=openCLContext->deviceInfo.localMemory;
+
+    kernels.insert({kernelName, kernelInfo});
+
+    return kernelInfo;
 }
 
-void getDeviceInfo(::cl::Platform platform, ::cl::Device device, OpenClDevice &deviceInfo)
+void getDeviceInfo(::cl::Device device, OpenClDevice &deviceInfo)
 {
     std::string platformName;
     std::string vendor;
     std::string version;
     cl_platform_id platformId;
     cl_device_type deviceType;
+
+    device.getInfo(CL_DEVICE_PLATFORM, &platformId);
+
+    ::cl::Platform platform(platformId);
 
     platform.getInfo(CL_PLATFORM_NAME, &platformName);
 
@@ -174,7 +229,16 @@ void getDeviceInfo(::cl::Platform platform, ::cl::Device device, OpenClDevice &d
 
     device.getInfo(CL_DEVICE_TYPE, &deviceType);
     device.getInfo(CL_DEVICE_NAME, &deviceInfo.name);
-    device.getInfo(CL_DEVICE_PLATFORM, &platformId);
+    device.getInfo(CL_DEVICE_BUILT_IN_KERNELS, &deviceInfo.builtInKernels);
+    device.getInfo(CL_DEVICE_EXTENSIONS, &deviceInfo.extensions);
+
+    device.getInfo(CL_DEVICE_MAX_COMPUTE_UNITS, &deviceInfo.computeUnits);
+    device.getInfo(CL_DEVICE_GLOBAL_MEM_CACHE_SIZE, &deviceInfo.globalCache);
+    device.getInfo(CL_DEVICE_GLOBAL_MEM_SIZE, &deviceInfo.globalMemory);
+    device.getInfo(CL_DEVICE_LOCAL_MEM_SIZE, &deviceInfo.localMemory);
+    device.getInfo(CL_DEVICE_MAX_WORK_GROUP_SIZE, &deviceInfo.maxWorkGroupSize);
+    device.getInfo(CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS, &deviceInfo.maxWorkItemDims);
+    device.getInfo(CL_DEVICE_MAX_WORK_ITEM_SIZES, &deviceInfo.maxWorkItemSizes);
 
     //device name can be null-terminated
     if(deviceInfo.name.back()==0)
@@ -254,7 +318,7 @@ std::vector<OpenClDevice> getDevices()
 //                deviceInfo.type=OpenClDevice::GPU;
 //                break;
 //            }
-            getDeviceInfo(platform, device, deviceInfo);
+            getDeviceInfo(device, deviceInfo);
             devices.push_back(deviceInfo);
         }
     }
@@ -288,7 +352,7 @@ std::vector<OpenClDevice> getDevices()
 
             ::cl::Context context(device);
 
-            getDeviceInfo(platform, device, deviceInfo);
+            getDeviceInfo(device, deviceInfo);
 
             checkInfo(device);
             return context;
@@ -299,7 +363,7 @@ std::vector<OpenClDevice> getDevices()
         {
             ::cl::Context context(device);
 
-            getDeviceInfo(platform, device, deviceInfo);
+            getDeviceInfo(device, deviceInfo);
             checkInfo(device);
             return context;
         }
@@ -339,7 +403,7 @@ std::vector<OpenClDevice> getDevices()
                 deviceId=device();
                 found=true;
 
-                getDeviceInfo(platform, device, deviceInfo);
+                getDeviceInfo(device, deviceInfo);
 
                 break;
             }
@@ -406,7 +470,7 @@ std::vector<OpenClDevice> getDevices()
                 deviceId=device();
                 found=true;
                 
-                getDeviceInfo(platform, device, deviceInfo);
+                getDeviceInfo(device, deviceInfo);
                 
                 break;
             }
@@ -431,11 +495,11 @@ void checkInfo(::cl::Device device)
 {
     std::string builtInKernels;
     std::string extensions;
-    unsigned long globalCache;
-    unsigned long globalMemory;
-    unsigned long localMemory;
+    cl_ulong globalCache;
+    cl_ulong globalMemory;
+    cl_ulong localMemory;
     size_t maxWorkGroupSize;
-    unsigned int maxWorkItemDims;
+    cl_uint maxWorkItemDims;
     std::vector<size_t> maxWorkItemSizes;
 
     device.getInfo(CL_DEVICE_BUILT_IN_KERNELS, &builtInKernels);

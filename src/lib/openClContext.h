@@ -4,16 +4,28 @@
 #include <CL/cl.hpp>
 #include "akaze_export.h"
 #include <limits>
+#include <memory>
 
 namespace libAKAZE
 {
 namespace cl
 {
 
-class OpenCLContext;
+struct KernelInfo
+{
+    ::cl::Kernel kernel;
+    
+    size_t workGroupSize;
+    size_t preferredWorkGroupMultiple;
+    cl_ulong localMemoryUsed;
 
-OpenCLContext *getOpenClContext(::cl::Context context);
+    cl_uint deviceComputeUnits;
+    cl_ulong deviceLocalMemory;
+};
+typedef std::shared_ptr<KernelInfo> SharedKernelInfo;
+
 ::cl::Kernel getKernel(::cl::Context context, std::string kernelName, std::string fileName);
+SharedKernelInfo getKernelInfo(::cl::Context context, std::string kernelName, std::string fileName);
 
 struct AKAZE_EXPORT OpenClDevice
 {
@@ -29,6 +41,16 @@ struct AKAZE_EXPORT OpenClDevice
     std::string platform;
     std::string vendor;
     std::string version;
+
+    cl_uint computeUnits;
+    std::string builtInKernels;
+    std::string extensions;
+    cl_ulong globalCache;
+    cl_ulong globalMemory;
+    cl_ulong localMemory;
+    size_t maxWorkGroupSize;
+    cl_uint maxWorkItemDims;
+    std::vector<size_t> maxWorkItemSizes;
 };
 
 AKAZE_EXPORT std::vector<OpenClDevice> getDevices();

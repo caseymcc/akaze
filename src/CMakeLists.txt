@@ -101,6 +101,7 @@ set(AKAZE_HEADERS
     lib/AKAZEConfig.h
     lib/AKAZE.h
 	lib/akazeTypes.h
+	lib/convolution.h
     lib/fed.h
     lib/nldiffusion_functions.h
     lib/utils.h
@@ -109,6 +110,7 @@ set(AKAZE_HEADERS
 # AKAZE source
 set(AKAZE_SRCS
     lib/AKAZE.cpp
+	lib/convolution.cpp
     lib/fed.cpp
     lib/nldiffusion_functions.cpp
     lib/utils.cpp
@@ -132,17 +134,18 @@ endif()
 if(AKAZE_USE_OPENCL)
     set(AKAZE_HEADERS ${AKAZE_HEADERS}
       lib/AKAZE_cl.h
-	  lib/convolution.h
+	  lib/convolve_cl.h
       lib/filters_cl.h
       lib/openClContext.h
     )
     set(AKAZE_SRCS ${AKAZE_SRCS}
       lib/AKAZE_cl.cpp
-	  lib/convolution.cpp
+	  lib/convolve_cl.cpp
       lib/filters_cl.cpp
       lib/openClContext.cpp
     )
 	set(AKAZE_KERNELS
+	  lib/kernels/contrast.cl
       lib/kernels/convolve.cl
     )
 
