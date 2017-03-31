@@ -7,6 +7,57 @@ namespace libAKAZE
 namespace cl
 {
 
+void zeroBuffer(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &buffer, size_t size, std::vector<::cl::Event> *events, ::cl::Event &event)
+{
+    cl_int status;
+    ::cl::Kernel kernel=getKernel(context, "zeroMemory", "lib/kernels/convolve.cl");
+
+    status=kernel.setArg(0, buffer);
+
+    ::cl::NDRange globalThreads(size);
+
+    status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
+}
+
+void zeroFloatBuffer(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &buffer, size_t size, std::vector<::cl::Event> *events, ::cl::Event &event)
+{
+    cl_int status;
+    ::cl::Kernel kernel=getKernel(context, "zeroFloatMemory", "lib/kernels/convolve.cl");
+
+    status=kernel.setArg(0, buffer);
+
+    ::cl::NDRange globalThreads(size);
+
+    status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
+}
+
+void zeroIntBuffer(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &buffer, size_t size, std::vector<::cl::Event> *events, ::cl::Event &event)
+{
+    cl_int status;
+    ::cl::Kernel kernel=getKernel(context, "zeroIntMemory", "lib/kernels/convolve.cl");
+
+    status=kernel.setArg(0, buffer);
+
+    ::cl::NDRange globalThreads(size);
+
+    status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
+}
+
+void zeroImage(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &image, std::vector<::cl::Event> *events, ::cl::Event &event)
+{
+    cl_int status;
+    size_t width, height;
+    ::cl::Kernel kernel=getKernel(context, "zeroImage", "lib/kernels/convolve.cl");
+
+    image.getImageInfo(CL_IMAGE_WIDTH, &width);
+    image.getImageInfo(CL_IMAGE_HEIGHT, &height);
+    status=kernel.setArg(0, image);
+    
+    ::cl::NDRange globalThreads(width, height);
+    
+    status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
+}
+
 void separableConvolve(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, ::cl::Buffer kernelXBuffer, int kernelXSize, ::cl::Buffer kernelYBuffer, int kernelYSize, ::cl::Image2D &dst)
 {
     ::cl::Event event;
@@ -56,7 +107,7 @@ void separableConvolve(::cl::Context context, ::cl::CommandQueue commandQueue, :
 
     status=commandQueue.enqueueNDRangeKernel(kernelX, ::cl::NullRange, globalThreads, ::cl::NullRange, &kernelYEvents, &event);
 
-    commandQueue.flush();
+//    commandQueue.flush();
 }
 
 void separableConvolve(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Buffer kernelXBuffer, int kernelXSize, 
@@ -96,7 +147,7 @@ void separableConvolve(::cl::Context context, ::cl::CommandQueue commandQueue, :
 
     status=commandQueue.enqueueNDRangeKernel(kernelX, ::cl::NullRange, globalThreads, ::cl::NullRange, &kernelYEvents, &event);
 
-    commandQueue.flush();
+//    commandQueue.flush();
 }
 
 void separableConvolve(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &src, size_t srcOffset, size_t width, size_t height, ::cl::Buffer kernelXBuffer, int kernelXSize,
@@ -139,7 +190,7 @@ void separableConvolve(::cl::Context context, ::cl::CommandQueue commandQueue, :
 
     status=commandQueue.enqueueNDRangeKernel(kernelX, ::cl::NullRange, globalThreads, ::cl::NullRange, &kernelYEvents, &event);
 
-    commandQueue.flush();
+//    commandQueue.flush();
 }
 
 ::cl::Buffer buildGaussianKernel(::cl::Context context, ::cl::CommandQueue commandQueue, float sigma, int &filterSize)
@@ -224,7 +275,7 @@ void gaussianConvolution(::cl::Context context, ::cl::CommandQueue commandQueue,
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
 
-    commandQueue.flush();
+//    commandQueue.flush();
 //    event.wait();
 }
 

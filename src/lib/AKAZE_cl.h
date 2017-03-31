@@ -165,6 +165,9 @@ private:
     ::cl::Buffer evolutionDyy_;
     ::cl::Buffer evolutionDet_;
 
+    ::cl::Buffer offsetGuassian_;
+    int offsetGuassianSize_;
+
     ::cl::Image2D contrastGuassianScratch_;
     ::cl::Image2D contrastMagnitudeScratch_;
     ::cl::Buffer contrastGuassian_;
@@ -174,6 +177,7 @@ private:
     ::cl::Buffer histogramBuffer_;
     std::vector<int> histogram_;
     ::cl::Buffer histogramScratchBuffer_;
+    ::cl::Buffer maxBuffer_;
 
     ::cl::Buffer keypointsBuffer_;
     int keypointsCount_;

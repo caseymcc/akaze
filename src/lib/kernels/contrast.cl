@@ -6,6 +6,8 @@ __kernel void computeContrast(read_only image2d_t input, int width, int height, 
 
     const int globalX=get_global_id(0);
     const int globalY=get_global_id(1);
+    const int groupX=get_group_id(0);
+    const int groupY=get_group_id(1);
     const int localX=get_local_id(0);
     const int localY=get_local_id(1);
     const int localXSize=get_local_size(0);
@@ -19,8 +21,8 @@ __kernel void computeContrast(read_only image2d_t input, int width, int height, 
     int imageCacheX=localXSize+2;
     int imageCacheY=localYSize+2;
 
-    int imageX=globalX-halfKernelSize;
-    int imageY=globalY-halfKernelSize;
+    int imageX=(groupX*localXSize)-halfKernelSize;
+    int imageY=(groupY*localYSize)-halfKernelSize;
 
     if(imageX+imageCacheX>width+1)
         imageCacheX=width-imageX+1;
@@ -32,18 +34,26 @@ __kernel void computeContrast(read_only image2d_t input, int width, int height, 
 //build up image cache
     if(cacheIndex < imageCacheSize)
     {
-        const int shiftX=(localX*2);
-        imageX+=shiftX;
-        imageY+=localY*2;
+//        const int shiftX=(localX*2);
+//        imageX+=shiftX;
+//        imageY+=localY*2;
+//
+//        if(shiftX>imageCacheX)
+//        {
+//            imageX=imageX-imageCacheX;
+//            imageY++;
+//        }
+        const int indexY=cacheIndex/imageCacheX;
+        imageY+=indexY;
+        imageX+=cacheIndex-(indexY*imageCacheX);
 
-        if(shiftX>imageCacheX)
-        {
-            imageX=imageX-imageCacheX;
-            imageY++;
-        }
+        float value1=read_imagef(input, nearestClampSampler, (int2)(imageX, imageY)).x;
+        float value2=read_imagef(input, nearestClampSampler, (int2)(imageX+1, imageY)).x;
 
-        imageCache[cacheIndex]=read_imagef(input, nearestClampSampler, (int2)(imageX, imageY)).x;
-        imageCache[cacheIndex+1]=read_imagef(input, nearestClampSampler, (int2)(imageX+1, imageY)).x;
+        imageCache[cacheIndex]=value1;
+        imageCache[cacheIndex+1]=value2;
+//        imageCache[cacheIndex]=read_imagef(input, nearestClampSampler, (int2)(imageX, imageY)).x;
+//        imageCache[cacheIndex+1]=read_imagef(input, nearestClampSampler, (int2)(imageX+1, imageY)).x;
     }
     
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -52,10 +62,7 @@ __kernel void computeContrast(read_only image2d_t input, int width, int height, 
     if((globalX >= width) || (globalY >= height))
         return;
 
-    const int cacheX=localX+halfKernelSize;
-    const int cacheY=localY+halfKernelSize;
-
-    int cacheXKernel=(cacheY*imageCacheX)+cacheX;
+    int cacheXKernel=(localY*imageCacheX)+localX;
 
 //calculate first order derivatives
     const float ul=imageCache[cacheXKernel];

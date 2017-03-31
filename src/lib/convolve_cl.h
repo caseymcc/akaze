@@ -7,6 +7,11 @@
 namespace libAKAZE{namespace cl
 {
 
+void zeroBuffer(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &buffer, size_t size, std::vector<::cl::Event> *events, ::cl::Event &event);
+void zeroFloatBuffer(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &buffer, size_t size, std::vector<::cl::Event> *events, ::cl::Event &event);
+void zeroIntBuffer(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &buffer, size_t size, std::vector<::cl::Event> *events, ::cl::Event &event);
+void zeroImage(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &image, std::vector<::cl::Event> *events, ::cl::Event &event);
+
 ///
 /// Performs convolution on serparable kernels
 ///

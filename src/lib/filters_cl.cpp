@@ -24,15 +24,27 @@ void calculateMagnitude(::cl::Context context, ::cl::CommandQueue commandQueue, 
     ::cl::NDRange globalThreads(width, height);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-    commandQueue.flush();
 }
 
-float calculateMax(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, std::vector<::cl::Event> *events, ::cl::Event &event)
+float calculateMax(::cl::Context &context, ::cl::CommandQueue &commandQueue, ::cl::Image2D &src, size_t width, size_t height, std::vector<::cl::Event> *events, ::cl::Event &event)
 {
-    std::vector<float> maxVector(height);
-    ::cl::Buffer maxBuffer(context, CL_MEM_WRITE_ONLY, sizeof(cl_float)*maxVector.size());
+    float maxValue;
+    ::cl::Buffer maxBuffer(context, CL_MEM_WRITE_ONLY, sizeof(cl_float));
+    ::cl::Event rowMaxEvent;
 
+    calculateMax(context, commandQueue, src, width, height, maxBuffer, events, rowMaxEvent);
+    std::vector<::cl::Event> rowMaxCompleteEvent={rowMaxEvent};
+
+    commandQueue.enqueueReadBuffer(maxBuffer, false, 0, sizeof(cl_float), &maxValue, &rowMaxCompleteEvent, &event);
+
+    commandQueue.flush();
+    event.wait();
+
+    return maxValue;
+}
+
+void calculateMax(::cl::Context &context, ::cl::CommandQueue &commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Buffer &maxBuffer, std::vector<::cl::Event> *events, ::cl::Event &event)
+{
     ::cl::Kernel kernel=getKernel(context, "rowMax", "lib/kernels/convolve.cl");
     ::cl::Event rowMaxEvent;
     cl_int status;
@@ -44,44 +56,40 @@ float calculateMax(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl:
 
     ::cl::NDRange globalThreads(height, 1);
 
-    status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &rowMaxEvent);
-
-    std::vector<::cl::Event> rowMaxCompleteEvent={rowMaxEvent};
-
-    commandQueue.enqueueReadBuffer(maxBuffer, false, 0, sizeof(cl_float)*maxVector.size(), maxVector.data(), &rowMaxCompleteEvent, &event);
-
-    commandQueue.flush();
-    event.wait();
-
-    float maxValue=maxVector[0];
-    for(size_t i=1; i<height; ++i)
-    { 
-        if(maxVector[i]>maxValue)
-            maxValue=maxVector[i];
-    }
-
-    return maxValue;
+    status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
 }
 
-std::vector<int> calculateHistogram(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, int bins, float scale, std::vector<::cl::Event> *events, ::cl::Event &event)
+std::vector<int> calculateHistogram(::cl::Context &context, ::cl::CommandQueue &commandQueue, ::cl::Image2D &src, size_t width, size_t height, int bins, float maxValue, std::vector<::cl::Event> *events, ::cl::Event &event)
 {
     std::vector<int> histogram(bins);
     
     ::cl::Buffer histogramBuffer(context, CL_MEM_WRITE_ONLY, sizeof(cl_int)*histogram.size());// , histogram.data());
     ::cl::Buffer scratchBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_int)*height*bins);
+    ::cl::Buffer maxValueBuffer(context, CL_MEM_READ_WRITE, sizeof(float));
 
-    return calculateHistogram(context, commandQueue, src, width, height, bins, scale,
-        histogramBuffer, histogram, scratchBuffer, events, event);
+    std::vector<::cl::Event> writeMaxValueEvent(1);
+    std::vector<::cl::Event> histogramCombineCompleteEvent(1);
+
+    commandQueue.enqueueWriteBuffer(maxValueBuffer, false, 0, sizeof(float), &scale, events, &writeMaxValueEvent[0]);
+
+    calculateHistogram(context, commandQueue, src, width, height, bins, maxValueBuffer,
+        histogramBuffer, scratchBuffer, &writeMaxValueEvent, histogramCombineCompleteEvent[0]);
+
+    commandQueue.enqueueReadBuffer(histogramBuffer, false, 0, sizeof(cl_int)*histogram.size(), histogram.data(), &histogramCombineCompleteEvent, &event);
+
+    commandQueue.flush();
+    event.wait();
+
+    return histogram;
 }
 
-std::vector<int> calculateHistogram(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, int bins, float scale, 
-    ::cl::Buffer histogramBuffer, std::vector<int> &histogram, ::cl::Buffer scratchBuffer, std::vector<::cl::Event> *events, ::cl::Event &event)
+void calculateHistogram(::cl::Context &context, ::cl::CommandQueue &commandQueue, ::cl::Image2D &src, size_t width, size_t height, int bins, ::cl::Buffer maxValueBuffer, 
+    ::cl::Buffer &histogramBuffer, ::cl::Buffer &scratchBuffer, std::vector<::cl::Event> *events, ::cl::Event &event)
 {
     ::cl::Kernel kernelHistogramRows=getKernel(context, "histogramRows", "lib/kernels/convolve.cl");
     ::cl::Kernel kernelHistogramCombine=getKernel(context, "histogramCombine", "lib/kernels/convolve.cl");
 
     ::cl::Event histogramRowEvent;
-    ::cl::Event histogramCombineEvent;
     cl_int status;
     int index=0;
     int items=32;
@@ -90,7 +98,7 @@ std::vector<int> calculateHistogram(::cl::Context context, ::cl::CommandQueue co
     status=kernelHistogramRows.setArg(index++, (int)width);
     status=kernelHistogramRows.setArg(index++, (int)height);
     status=kernelHistogramRows.setArg(index++, bins);
-    status=kernelHistogramRows.setArg(index++, scale);
+    status=kernelHistogramRows.setArg(index++, maxValueBuffer);
     status=kernelHistogramRows.setArg(index++, scratchBuffer);
 //    status=kernelHistogramRows.setArg(index++, items*bins, nullptr);
 //
@@ -126,16 +134,9 @@ std::vector<int> calculateHistogram(::cl::Context context, ::cl::CommandQueue co
 
     ::cl::NDRange globalBinThreads(bins);
 
-    status=commandQueue.enqueueNDRangeKernel(kernelHistogramCombine, ::cl::NullRange, globalBinThreads, ::cl::NullRange, &histogramRowCompleteEvent, &histogramCombineEvent);
+    status=commandQueue.enqueueNDRangeKernel(kernelHistogramCombine, ::cl::NullRange, globalBinThreads, ::cl::NullRange, &histogramRowCompleteEvent, &event);
 
-    std::vector<::cl::Event> histogramCombineCompleteEvent={histogramCombineEvent};
-
-    status=commandQueue.enqueueReadBuffer(histogramBuffer, false, 0, sizeof(cl_int)*histogram.size(), histogram.data(), &histogramCombineCompleteEvent, &event);
-
-    commandQueue.flush();
-    event.wait();
-
-    return histogram;
+    
 }
 
 void computeContrast(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Image2D &dst, std::vector<::cl::Event> *events, ::cl::Event &event)
@@ -168,8 +169,6 @@ void computeContrast(::cl::Context context, ::cl::CommandQueue commandQueue, ::c
     ::cl::NDRange localThreads(localX, localY);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, localThreads, events, &event);
-
-    commandQueue.flush();
 }
 
 float computeKPercentile(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, float perc, float gscale, size_t nbins)
@@ -195,58 +194,82 @@ float computeKPercentile(::cl::Context context, ::cl::CommandQueue commandQueue,
     ::cl::Buffer histogramBuffer(context, CL_MEM_READ_ONLY|CL_MEM_USE_HOST_PTR, sizeof(cl_int)*histogram.size(), histogram.data());
     ::cl::Buffer histogramScratchBuffer(context, CL_MEM_READ_WRITE, sizeof(cl_int)*height*nbins);
     
-    return computeKPercentile(context, commandQueue, src, width, height, perc, nbins, gaussian, magnitude, histogramBuffer, histogram, histogramScratchBuffer, 
-        guassianKernel, gussianKernelSize, scratch);
+    ::cl::Buffer maxBuffer(context, CL_MEM_READ_WRITE, sizeof(float));
 
+    std::vector<::cl::Event> contrastWaitEvent(1);
+    ::cl::Event hitogramMaxEvent;
+    ::cl::Event hitogramEvent;
+//    return computeKPercentile(context, commandQueue, src, width, height, perc, nbins, gaussian, magnitude, histogramBuffer, histogram, histogramScratchBuffer, 
+//        guassianKernel, gussianKernelSize, scratch);
+
+    float histogramMax;
+
+    commandQueue.enqueueReadBuffer(maxBuffer, false, 0, sizeof(float), &histogramMax, &contrastWaitEvent, &hitogramMaxEvent);
+    commandQueue.enqueueReadBuffer(histogramBuffer, false, 0, sizeof(cl_int)*histogram.size(), histogram.data(), &contrastWaitEvent, &hitogramEvent);
+
+    hitogramMaxEvent.wait();
+    hitogramEvent.wait();
+
+    float contrast=computeContrast(histogram, histogramMax, perc);
+
+    return contrast;
 }
 
-float computeKPercentile(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, int width, int height, float perc, size_t nbins,
-    ::cl::Image2D gaussian, ::cl::Image2D magnitude, ::cl::Buffer histogramBuffer, std::vector<cl_int> &histogram, ::cl::Buffer histogramScratchBuffer,
-    ::cl::Buffer guassianKernel, int guassiankernelSize, ::cl::Image2D scratch)
+void computeKPercentile(::cl::Context &context, ::cl::CommandQueue &commandQueue, ::cl::Image2D &src, int width, int height, size_t nbins,
+    ::cl::Image2D &gaussian, ::cl::Image2D &magnitude, ::cl::Buffer &histogramBuffer, ::cl::Buffer &histogramScratchBuffer,
+    ::cl::Buffer &guassianKernel, int guassiankernelSize, ::cl::Image2D &scratch, ::cl::Image2D lx, ::cl::Image2D ly, ScharrSeparableKernel &scharrKernel, int scharrKernelSize,
+    ::cl::Buffer &maxValue, std::vector<::cl::Event> *events, ::cl::Event &event)
 {
-    size_t nbin=0, nelements=0, nthreshold=0, k=0;
-    float kperc=0.0, modg=0.0, npoints=0.0, hmax=0.0;
-
-    ::cl::Event guassianEvent;
+    std::vector<::cl::Event> guassianWaitEvent(1);
+    std::vector<::cl::Event> combinedWaitEvent(1);
+    std::vector<::cl::Event> maxWaitEvent(1);
     
     // Perform the Gaussian convolution
 //    gaussianSeparable(context, commandQueue, src, gaussian, width, height, gscale, nullptr, guassianEvent);
-    gaussianSeparable(context, commandQueue, src, gaussian, width, height, guassianKernel, guassiankernelSize, scratch, nullptr, guassianEvent);
+    gaussianSeparable(context, commandQueue, src, gaussian, width, height, guassianKernel, guassiankernelSize, scratch, events, guassianWaitEvent[0]);
 
-    std::vector<::cl::Event> waitEvent={guassianEvent};
+//    {
+//        guassianWaitEvent[0].wait();
+//        std::string outputFile="../output/computeContrastGauss_cl.jpg";
+//        saveImage2D(commandQueue, gaussian, outputFile);
+//    }
+
+#if 0
     std::vector<::cl::Event> derivativeEvent(2);
 
-//    // Compute the Gaussian derivatives Lx and Ly
-//    scharrSeparable(context, commandQueue, gaussian, width, height, 1, 1.0, false, false, lx, scharrKernel, scharrKernelSize, &waitEvent, derivativeEvent[0]);
-//    scharrSeparable(context, commandQueue, gaussian, width, height, 1, 1.0, true, false, ly, scharrKernel, scharrKernelSize, &waitEvent, derivativeEvent[1]);
-//
-//    // Calculate magnitude
-    ::cl::Event combinedEvent;
-//    calculateMagnitude(context, commandQueue, lx, ly, magnitude, width, height, &derivativeEvent, combinedEvent);
-    computeContrast(context, commandQueue, gaussian, width, height, magnitude, &waitEvent, combinedEvent);
+    // Compute the Gaussian derivatives Lx and Ly
+    scharrSeparable(context, commandQueue, gaussian, width, height, 1, 1.0, false, false, lx, scharrKernel, scharrKernelSize, scratch, &guassianWaitEvent, derivativeEvent[0]);
+    scharrSeparable(context, commandQueue, gaussian, width, height, 1, 1.0, true, false, ly, scharrKernel, scharrKernelSize, scratch, &guassianWaitEvent, derivativeEvent[1]);
 
-    combinedEvent.wait();
+    // Calculate magnitude
+    calculateMagnitude(context, commandQueue, lx, ly, magnitude, width, height, &derivativeEvent, combinedWaitEvent[0]);
+#else
+    computeContrast(context, commandQueue, gaussian, width, height, magnitude, &guassianWaitEvent, combinedWaitEvent[0]);
+#endif
 
     // Get the maximum from the magnitude
-    std::vector<::cl::Event> combinedWaitEvent={combinedEvent};
-    ::cl::Event maxEvent;
-    hmax=calculateMax(context, commandQueue, magnitude, width, height, &combinedWaitEvent, maxEvent);
-
-    ::cl::Event histogramEvent;
+    calculateMax(context, commandQueue, magnitude, width, height, maxValue, &combinedWaitEvent, maxWaitEvent[0]);
 
     //Create scaled histogram using nbins and max of magnitude
-    float maxScale=1/hmax;
-    std::vector<int> hist=calculateHistogram(context, commandQueue, magnitude, width, height, nbins, maxScale, histogramBuffer, histogram, histogramScratchBuffer,
-        nullptr, histogramEvent);
+//    float maxScale=1/hmax;
+    calculateHistogram(context, commandQueue, magnitude, width, height, nbins, maxValue, histogramBuffer, histogramScratchBuffer,
+        &maxWaitEvent, event);
+}
 
-    for(size_t i=0; i<hist.size(); ++i)
-        npoints+=hist[i];
+float computeContrast(std::vector<int> &histogram, float hmax, float perc)
+{
+    size_t nbin=0, nelements=0, nthreshold=0, k=0;
+    float kperc=0.0, modg=0.0, npoints=0.0;
 
+    for(size_t i=0; i<histogram.size(); ++i)
+        npoints+=histogram[i];
+
+    size_t nbins=histogram.size();
     // Now find the perc of the histogram percentile
     nthreshold=(size_t)(npoints * perc);
 
     for(k=0; nelements < nthreshold && k < nbins; k++)
-        nelements=nelements+hist[k];
+        nelements=nelements+histogram[k];
 
     if(nelements < nthreshold)
         kperc=0.03;
@@ -270,8 +293,6 @@ void linearSample(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::
     ::cl::NDRange globalThreads(dstWidth, dstHeight);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-    commandQueue.flush();
 }
 
 void pmG1(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src1, ::cl::Image2D &src2, ::cl::Image2D &dst, size_t width, size_t height, float contrast, std::vector<::cl::Event> *events, ::cl::Event &event)
@@ -288,8 +309,6 @@ void pmG1(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D 
     ::cl::NDRange globalThreads(width, height);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-    commandQueue.flush();
 }
 
 void pmG2(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src1, ::cl::Image2D &src2, ::cl::Image2D &dst, size_t width, size_t height, float contrast, std::vector<::cl::Event> *events, ::cl::Event &event)
@@ -306,8 +325,6 @@ void pmG2(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D 
     ::cl::NDRange globalThreads(width, height);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-    commandQueue.flush();
 }
 
 void weickert(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src1, ::cl::Image2D &src2, ::cl::Image2D &dst, size_t width, size_t height, float contrast, std::vector<::cl::Event> *events, ::cl::Event &event)
@@ -324,8 +341,6 @@ void weickert(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Imag
     ::cl::NDRange globalThreads(width, height);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-    commandQueue.flush();
 }
 
 void charbonnier(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src1, ::cl::Image2D &src2, ::cl::Image2D &dst, size_t width, size_t height, float contrast, std::vector<::cl::Event> *events, ::cl::Event &event)
@@ -342,8 +357,6 @@ void charbonnier(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::I
     ::cl::NDRange globalThreads(width, height);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-    commandQueue.flush();
 }
 
 void nldStepScalar(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &image, ::cl::Image2D &flow, ::cl::Image2D &step, size_t width, size_t height, float stepsize, std::vector<::cl::Event> *events, ::cl::Event &event)
@@ -360,8 +373,6 @@ void nldStepScalar(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl:
     ::cl::NDRange globalThreads(width, height);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-    commandQueue.flush();
 }
 
 void scale(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &image, size_t width, size_t height, float scale, std::vector<::cl::Event> *events, ::cl::Event &event)
@@ -385,8 +396,6 @@ void scale(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D
     ::cl::NDRange localThreads(workGroupSizeMultiple);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, localThreads, events, &event);
-
-    commandQueue.flush();
 }
 
 void determinantHessian(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &dxx, ::cl::Image2D &dyy, ::cl::Image2D &dxy, size_t width, size_t height, ::cl::Buffer &output, std::vector<::cl::Event> *events, ::cl::Event &event)
@@ -403,8 +412,6 @@ void determinantHessian(::cl::Context context, ::cl::CommandQueue commandQueue, 
     ::cl::NDRange globalThreads(width, height);
     
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-    commandQueue.flush();
 }
 
 void determinantHessian(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &dxx, size_t dxxOffset, ::cl::Buffer &dyy, size_t dyyOffset, ::cl::Buffer &dxy, size_t dxyOffset, 
@@ -428,8 +435,6 @@ void determinantHessian(::cl::Context context, ::cl::CommandQueue commandQueue, 
     ::cl::NDRange globalThreads(width, height);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-    commandQueue.flush();
 }
 
 void findExtrema(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &detImage, size_t width, size_t height, ::cl::Buffer &featureMap, size_t featureMapWidth, size_t featureMapHeight,
@@ -455,8 +460,6 @@ void findExtrema(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::I
     ::cl::NDRange globalThreads(width, height);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-    commandQueue.flush();
 }
 
 void findExtremaIterate(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &detImage, size_t width, size_t height, ::cl::Buffer &featureMap, size_t featureMapWidth, size_t featureMapHeight,
@@ -482,8 +485,6 @@ void findExtremaIterate(::cl::Context context, ::cl::CommandQueue commandQueue, 
     ::cl::NDRange globalThreads(width-(2*border), height-(2*border));
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-    commandQueue.flush();
 }
 
 void findExtrema(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &detImage, ::cl::Buffer &featureMap, int width, int height, int mapIndex, ::cl::Buffer evolutionBuffer, float threshold, float derivativeFactor, int border,
@@ -526,8 +527,6 @@ void findExtrema(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::B
     ::cl::NDRange globalThreads(workX, workY);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-	commandQueue.flush();
 }
 
 void consolidateKeypoints(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &featureMap, int width, int height, int mapIndex, ::cl::Buffer evolutionBuffer, int border,
@@ -555,8 +554,6 @@ void consolidateKeypoints(::cl::Context context, ::cl::CommandQueue commandQueue
     ::cl::NDRange globalThreads(workX, workY);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-    commandQueue.flush();
 }
 
 void subPixelRefinement(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &det, ::cl::Buffer evolutionBuffer, ::cl::Buffer keypoints, int keypointCount, 
@@ -575,8 +572,6 @@ void subPixelRefinement(::cl::Context context, ::cl::CommandQueue commandQueue, 
     ::cl::NDRange globalThreads(keypointCount, 1);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-    commandQueue.flush();
 }
 
 void computeOrientation(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &keypoints, size_t count, ::cl::Buffer &dx, ::cl::Buffer &dy,
@@ -631,8 +626,6 @@ void computeOrientation(::cl::Context context, ::cl::CommandQueue commandQueue, 
 //            file<<"("<<data[dataOffset+(j*3)]<<", "<<data[dataOffset+(j*3)+1]<<") "<<data[dataOffset+(j*3)+2]<<"\n";
 //        }
 //    }
-
-    commandQueue.flush();
 }
 
 void getMLDBDescriptors(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &keypoints, ::cl::Buffer descriptors, size_t count, ::cl::Buffer &image, ::cl::Buffer &dx, ::cl::Buffer &dy,
@@ -656,8 +649,6 @@ void getMLDBDescriptors(::cl::Context context, ::cl::CommandQueue commandQueue, 
     ::cl::NDRange globalThreads(count);
 
     status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &event);
-
-    commandQueue.flush();
 }
 
 }}//namespace libAKAZE::cl

@@ -157,7 +157,7 @@ int main(int argc, char* argv[])
         break;
     }
 
-#if(defined(_WINDOWS) && defined(_DEBUG))
+#if(defined(_WINDOWS))// && defined(_DEBUG))
     system("pause");
 #endif
     return value;

@@ -156,7 +156,8 @@ void AKAZE::Allocate_Memory_Evolution()
 
     event.wait();
 
-    contrastGuassian_=buildGaussianKernel(openclContext_, commandQueue_, 1.0, contrastGuassianSize_);
+    offsetGuassian_=buildGaussianSeparableKernel(openclContext_, commandQueue_, options_.soffset, offsetGuassianSize_);
+    contrastGuassian_=buildGaussianSeparableKernel(openclContext_, commandQueue_, 1.0, contrastGuassianSize_);
     contrastScharr_=buildScharrSeparableKernel(openclContext_, 1, contrastScharrSize_, false);
 
     histogram_.resize(options_.kcontrast_nbins);
@@ -164,12 +165,36 @@ void AKAZE::Allocate_Memory_Evolution()
 
     commandQueue_.enqueueWriteBuffer(histogramBuffer_, CL_FALSE, 0, histogram_.size()*sizeof(cl_float), histogram_.data(), nullptr, &event);
 
+    maxBuffer_=::cl::Buffer(openclContext_, CL_MEM_READ_WRITE, sizeof(float));
     histogramScratchBuffer_=::cl::Buffer(openclContext_, CL_MEM_READ_WRITE, sizeof(cl_int)*evolution_[0].height*options_.kcontrast_nbins);
 
     contrastGuassianScratch_=::cl::Image2D(openclContext_, CL_MEM_READ_WRITE, ::cl::ImageFormat(CL_R, CL_FLOAT), evolution_[0].width, evolution_[0].height);
     contrastMagnitudeScratch_=::cl::Image2D(openclContext_, CL_MEM_READ_WRITE, ::cl::ImageFormat(CL_R, CL_FLOAT), evolution_[0].width, evolution_[0].height);
 
     event.wait();
+
+    //opencl has lazy buffer initialization so these buffers will not be created till used, this forces their creation
+    std::vector<::cl::Event> events(11);
+
+    zeroFloatBuffer(openclContext_, commandQueue_, evolutionImage_, bufferSize, nullptr, events[0]);
+    zeroFloatBuffer(openclContext_, commandQueue_, evolutionDx_, bufferSize, nullptr, events[1]);
+    zeroFloatBuffer(openclContext_, commandQueue_, evolutionDy_, bufferSize, nullptr, events[2]);
+    zeroFloatBuffer(openclContext_, commandQueue_, evolutionDxx_, bufferSize, nullptr, events[3]);
+    zeroFloatBuffer(openclContext_, commandQueue_, evolutionDxy_, bufferSize, nullptr, events[4]);
+    zeroFloatBuffer(openclContext_, commandQueue_, evolutionDyy_, bufferSize, nullptr, events[5]);
+    zeroFloatBuffer(openclContext_, commandQueue_, evolutionDet_, bufferSize, nullptr, events[6]);
+//    zeroBuffer(openclContext_, commandQueue_, evolutionInfo_, bufferSize*sizeof(EvolutionInfo), nullptr, events[7]);
+//    events[7].wait();
+//
+//    zeroBuffer(openclContext_, commandQueue_, extremaMap_, bufferSize*sizeof(ExtremaMap), nullptr, events[8]);
+//    events[8].wait();
+    zeroFloatBuffer(openclContext_, commandQueue_, maxBuffer_, 1, nullptr, events[7]);
+    zeroIntBuffer(openclContext_, commandQueue_, histogramScratchBuffer_, evolution_[0].height*options_.kcontrast_nbins, nullptr, events[8]);
+
+    zeroImage(openclContext_, commandQueue_, contrastGuassianScratch_, nullptr, events[9]);
+    zeroImage(openclContext_, commandQueue_, contrastMagnitudeScratch_, nullptr, events[10]);
+
+    ::cl::WaitForEvents(events);
 }
 
 int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
@@ -189,7 +214,9 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
     ::cl::Event imageEvent;
     ::cl::Event guassEvent;
     ::cl::Event copyEvent;
-    std::vector<::cl::Event> events;
+    std::vector<::cl::Event> writeImageEvents(1);
+    std::vector<::cl::Event> guassianEvents(1);
+    std::vector<::cl::Event> contrastWaitEvents(1);
     timer::Timer timer;
 
     origin[0]=0;
@@ -200,20 +227,28 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
     region[1]=image.rows();
     region[2]=1;
 
-    commandQueue_.enqueueWriteImage(evolution_[0].image, CL_FALSE, origin, region, 0, 0, (void *)image.data(), nullptr, &imageEvent);
-    events.push_back(imageEvent);
+    commandQueue_.enqueueWriteImage(evolution_[0].image, CL_FALSE, origin, region, 0, 0, (void *)image.data(), nullptr, &writeImageEvents[0]);
 
 //    imageEvent.wait();
+    gaussianSeparable(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].smooth, image.cols(), image.rows(), options_.soffset, &writeImageEvents, guassianEvents[0]);
+//    gaussianSeparable(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].smooth, image.cols(), image.rows(), offsetGuassian_, offsetGuassianSize_, evolution_[0].scratch, &events, guassEvent);
 
-    gaussianSeparable(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].smooth, image.cols(), image.rows(), options_.soffset, &events, guassEvent);
-//    guassEvent.wait();
-    events.push_back(guassEvent);
-    commandQueue_.enqueueCopyImage(evolution_[0].smooth, evolution_[0].image, origin, origin, region, &events, &copyEvent);
+    commandQueue_.enqueueCopyImage(evolution_[0].smooth, evolution_[0].image, origin, origin, region, &guassianEvents, &copyEvent);
 
 //    float kcontrast=computeKPercentile(openclContext_, commandQueue_, evolution_[0].image, options_.kcontrast_percentile, 1.0, options_.kcontrast_nbins, 0, 0);
-    float kcontrast=computeKPercentile(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].width, evolution_[0].height, options_.kcontrast_percentile, options_.kcontrast_nbins,
-        contrastGuassianScratch_, contrastMagnitudeScratch_, histogramBuffer_, histogram_, histogramScratchBuffer_, contrastGuassian_, contrastGuassianSize_, evolution_[0].scratch);
+    float kcontrast;
 
+    computeKPercentile(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].width, evolution_[0].height, options_.kcontrast_nbins,
+        contrastGuassianScratch_, contrastMagnitudeScratch_, histogramBuffer_, histogramScratchBuffer_, contrastGuassian_, contrastGuassianSize_, evolution_[0].scratch,
+        evolution_[0].lx, evolution_[0].ly, contrastScharr_, contrastScharrSize_, maxBuffer_, &writeImageEvents, contrastWaitEvents[0]);
+    
+    float histogramMax;
+    std::vector<::cl::Event> readHistogramEvents(2);
+
+    commandQueue_.enqueueReadBuffer(maxBuffer_, false, 0, sizeof(float), &histogramMax, &contrastWaitEvents, &readHistogramEvents[0]);
+    commandQueue_.enqueueReadBuffer(histogramBuffer_, false, 0, sizeof(cl_int)*histogram_.size(), histogram_.data(), &contrastWaitEvents, &readHistogramEvents[1]);
+
+    bool contrastLoaded=false;
     timing_.kcontrast=timer.elapsedMs();
 
     copyEvent.wait();
@@ -261,6 +296,13 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
 
         std::vector<::cl::Event>derivativeWaitEvent={derivativeXEvent, derivativeYEvent};
         ::cl::Event diffusivityEvent;
+
+        if(!contrastLoaded)
+        {
+            ::cl::WaitForEvents(readHistogramEvents);
+            kcontrast=computeContrast(histogram_, histogramMax, options_.kcontrast_percentile);
+            contrastLoaded=true;
+        }
 
         switch(options_.diffusivity)
         {

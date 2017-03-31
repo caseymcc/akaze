@@ -1,4 +1,78 @@
 //#define TRACK_REMOVED
+inline void atomicMaxLocal(volatile __local float *addr, float value)
+{
+    union
+    {
+        unsigned int u32;
+        float f32;
+    } next, expected, current;
+
+    current.f32=*addr;
+
+    do
+    {
+        expected.f32=current.f32;
+
+        if(value<expected.f32)
+            break;
+
+        next.f32=value;
+        current.u32=atomic_cmpxchg((volatile __local unsigned int *)addr, expected.u32, next.u32);
+    } while(current.u32!=expected.u32);
+
+}
+
+inline void atomicMaxGlobal(volatile __global float *addr, float value)
+{
+    union
+    {
+        unsigned int u32;
+        float f32;
+    } next, expected, current;
+
+    current.f32=*addr;
+
+    do
+    {
+        expected.f32=current.f32;
+
+        if(value<expected.f32)
+            break;
+
+        next.f32=value;
+        current.u32=atomic_cmpxchg((volatile __global unsigned int *)addr, expected.u32, next.u32);
+    } while(current.u32!=expected.u32);
+
+}
+
+__kernel void zeroMemory(__global uchar *buffer)
+{
+    const int globalX=get_global_id(0);
+
+    buffer[globalX]=0;
+}
+
+__kernel void zeroFloatMemory(__global float *buffer)
+{
+    const int globalX=get_global_id(0);
+
+    buffer[globalX]=0.0f;
+}
+
+__kernel void zeroIntMemory(__global int *buffer)
+{
+    const int globalX=get_global_id(0);
+
+    buffer[globalX]=0.0f;
+}
+
+__kernel void zeroFloatImage(write_only image2d_t image)
+{
+    const int globalX=get_global_id(0);
+    const int globalY=get_global_id(1);
+
+    write_imagef(image, (int2)(globalX, globalY), 0.0);
+}
 
 __kernel void convolve(read_only image2d_t input, __constant float *kernelBuffer, const int kernelSize, write_only image2d_t output)
 {
@@ -25,6 +99,70 @@ __kernel void convolve(read_only image2d_t input, __constant float *kernelBuffer
         }
     }
     write_imagef(output, (int2)(xOutput, yOutput), sum);
+}
+
+void copyToLocal(read_only image2d_t input, int width, int height, intborder)
+{
+}
+
+__kernel void separableConvolveImage2D(read_only image2d_t input, int width, int height, __constant float *kernelX, __constant float *kernelY, const int kernelSize, float scale, write_only image2d_t output, float *imageCache)
+{
+    const sampler_t nearestClampSampler=CLK_NORMALIZED_COORDS_FALSE|CLK_FILTER_NEAREST|CLK_ADDRESS_CLAMP_TO_EDGE;
+
+    const int globalX=get_global_id(0);
+    const int globalY=get_global_id(1);
+
+    const int localSizeX=get_local_size(0);
+    const int localSizeY=get_local_size(1);
+    
+    const int halfKernelSize=kernelSize/2;
+    int imageCacheX=localSizeX+(2*halfKernelSize);
+    int imageCacheY=localSizeY+(2*halfKernelSize);
+
+    const int imageX=(groupX*localXSize)-halfKernelSize;
+    const int imageY=(groupY*localYSize)-halfKernelSize;
+
+    if(imageX+imageCacheX >= width)
+        imageCacheX=width-imageX+1;
+    if(imageY+imageCacheY >= height)
+        imageCacheY=height-imageY+1;
+
+    const int imageCacheSize=imageCacheX*imageCacheY;
+
+    const int perItemCache=ceil((float)imageCacheSize/(localSizeX*localSizeY));
+    const int cacheIndex=((localY*localXSize)+localX)*perItemCache;
+
+    if(cacheIndex < imageCacheSize)
+    {
+        int indexY=imageY+cacheIndex/imageCacheX;
+        int indexX=cacheIndex-(indexY*imageCacheX);
+
+        for(int i=0; i<perItemCache; ++i)
+        {
+            imageCache[cacheIndex+i]=read_imagef(input, nearestClampSampler, (int2)(indexX, indexY)).x;
+            indexX++;
+
+            if(index>imageCacheX)
+            {
+                indexX=imageX;
+                indexY++;
+            }
+        }
+    }
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if((globalX>=width)||(globalY>=height))
+        return;
+
+    int cachePos=(localY*imageCacheX)+localX;
+
+    for(int x=0; x<kernelSize; x++)
+    {
+        float value=read_imagef(input, nearestClampSampler, (int2)(xInput+x, yOutput)).x;
+
+        sum+=kernelX[x]*value;
+    }
 }
 
 __kernel void separableConvolveXImage2D(read_only image2d_t input, __constant float *kernelX, const int kernelSize, float scale, write_only image2d_t output)
@@ -268,10 +406,11 @@ __kernel void rowMax(read_only image2d_t input, int width, __global float *outpu
             max=value;
     }
 
-    output[index]=max;
+    output[0]=max;
+    //atomicMaxGlobal(output, max);
 }
 
-__kernel void histogramRows(read_only image2d_t input, int width, int height, int bins, float scale, __global int *output)//, volatile __local int *accumulator)
+__kernel void histogramRows(read_only image2d_t input, int width, int height, int bins, __global float *maxValue, __global int *output)//, volatile __local int *accumulator)
 {
     const sampler_t nearestClampSampler=CLK_NORMALIZED_COORDS_FALSE|CLK_FILTER_NEAREST|CLK_ADDRESS_CLAMP_TO_EDGE;
     const int index=get_global_id(0);
@@ -279,6 +418,7 @@ __kernel void histogramRows(read_only image2d_t input, int width, int height, in
     if(index>=height)
         return;
 
+    const float scale=1.0f/maxValue[0];
     const int stride=bins*index;
 //    const int accumulatorStride=bins*get_local_id(0);
 
@@ -798,52 +938,6 @@ __kernel void subPixelRefinement(__global float *det, __global EvolutionInfo *ev
             filteredKeypoint->removed=keypoint->removed;
 #endif //TRACK_REMOVED
     }
-}
-
-inline void atomicMaxLocal(volatile __local float *addr, float value)
-{
-    union
-    {
-        unsigned int u32;
-        float f32;
-    } next, expected, current;
-
-    current.f32=*addr;
-
-    do
-    {
-        expected.f32=current.f32;
-
-        if(value<expected.f32)
-            break;
-
-        next.f32=value;
-        current.u32=atomic_cmpxchg((volatile __local unsigned int *)addr, expected.u32, next.u32);
-    } while(current.u32!=expected.u32);
-
-}
-
-inline void atomicMaxGlobal(volatile __global float *addr, float value)
-{
-    union
-    {
-        unsigned int u32;
-        float f32;
-    } next, expected, current;
-
-    current.f32=*addr;
-
-    do
-    {
-        expected.f32=current.f32;
-
-        if(value<expected.f32)
-            break;
-
-        next.f32=value;
-        current.u32=atomic_cmpxchg((volatile __global unsigned int *)addr, expected.u32, next.u32);
-    } while(current.u32!=expected.u32);
-
 }
 
 __constant float gauss25[7][7]=

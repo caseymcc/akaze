@@ -17,22 +17,25 @@ void calculateMagnitude(::cl::Context context, ::cl::CommandQueue commandQueue, 
 ///
 ///
 ///
-float calculateMax(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, std::vector<::cl::Event> *events, ::cl::Event &event);
+float calculateMax(::cl::Context &context, ::cl::CommandQueue &commandQueue, ::cl::Image2D &src, size_t width, size_t height, std::vector<::cl::Event> *events, ::cl::Event &event);
+void calculateMax(::cl::Context &context, ::cl::CommandQueue &commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Buffer &maxBuffer, std::vector<::cl::Event> *events, ::cl::Event &event);
 
 ///
 ///
 ///
 std::vector<int> calculateHistogram(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, int bins, float scale, std::vector<::cl::Event> *events, ::cl::Event &event);
-std::vector<int> calculateHistogram(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, int bins, float scale,
-    ::cl::Buffer histogramBuffer, std::vector<int> &histogram, ::cl::Buffer scratchBuffer, std::vector<::cl::Event> *events, ::cl::Event &event);
+void calculateHistogram(::cl::Context &context, ::cl::CommandQueue &commandQueue, ::cl::Image2D &src, size_t width, size_t height, int bins, ::cl::Buffer maxValueBuffer,
+    ::cl::Buffer &histogramBuffer, ::cl::Buffer &scratchBuffer, std::vector<::cl::Event> *events, ::cl::Event &event);
 
 ///
 ///
 ///
 float computeKPercentile(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, float perc, float gscale, size_t nbins);
-float computeKPercentile(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, int width, int height, float perc, size_t nbins,
-    ::cl::Image2D gaussian, ::cl::Image2D magnitude, ::cl::Buffer histogramBuffer, std::vector<cl_int> &histogram, ::cl::Buffer histogramScratchBuffer,
-    ::cl::Buffer guassianKernel, int guassiankernelSize, ::cl::Image2D scratch);
+void computeKPercentile(::cl::Context &context, ::cl::CommandQueue &commandQueue, ::cl::Image2D &src, int width, int height, size_t nbins,
+    ::cl::Image2D &gaussian, ::cl::Image2D &magnitude, ::cl::Buffer &histogramBuffer, ::cl::Buffer &histogramScratchBuffer,
+    ::cl::Buffer &guassianKernel, int guassiankernelSize, ::cl::Image2D &scratch, ::cl::Image2D lx, ::cl::Image2D ly, ScharrSeparableKernel &scharrKernel, int scharrKernelSize,
+    ::cl::Buffer &maxValue, std::vector<::cl::Event> *events, ::cl::Event &event);
+float computeContrast(std::vector<int> &histogram, float hmax, float perc);
 
 ///
 ///
