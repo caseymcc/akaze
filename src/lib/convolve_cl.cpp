@@ -47,7 +47,7 @@ void zeroImage(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Ima
 {
     cl_int status;
     size_t width, height;
-    ::cl::Kernel kernel=getKernel(context, "zeroImage", "lib/kernels/convolve.cl");
+    ::cl::Kernel kernel=getKernel(context, "zeroFloatImage", "lib/kernels/convolve.cl");
 
     image.getImageInfo(CL_IMAGE_WIDTH, &width);
     image.getImageInfo(CL_IMAGE_HEIGHT, &height);
@@ -153,8 +153,6 @@ void separableConvolve(::cl::Context context, ::cl::CommandQueue commandQueue, :
 void separableConvolve(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Buffer &src, size_t srcOffset, size_t width, size_t height, ::cl::Buffer kernelXBuffer, int kernelXSize,
     ::cl::Buffer kernelYBuffer, int kernelYSize, float scale, ::cl::Buffer &dst, size_t dstOffset, ::cl::Buffer &scratch, std::vector<::cl::Event> *events, ::cl::Event &event)
 {
-    size_t filterSize;
-
     ::cl::Kernel kernelX=getKernel(context, "separableConvolveXBuffer", "lib/kernels/convolve.cl");
     ::cl::Kernel kernelY=getKernel(context, "separableConvolveYBuffer", "lib/kernels/convolve.cl");
     cl_int status;
@@ -191,6 +189,42 @@ void separableConvolve(::cl::Context context, ::cl::CommandQueue commandQueue, :
     status=commandQueue.enqueueNDRangeKernel(kernelX, ::cl::NullRange, globalThreads, ::cl::NullRange, &kernelYEvents, &event);
 
 //    commandQueue.flush();
+}
+
+void separableConvolve_localXY(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Buffer kernelXBuffer, int kernelXSize,
+    ::cl::Buffer kernelYBuffer, int kernelYSize, float scale, ::cl::Image2D &dst, std::vector<::cl::Event> *events, ::cl::Event &event)
+{
+    ::cl::Kernel kernel=getKernel(context, "separableConvolveImage2DXY", "lib/kernels/convolve.cl");
+    cl_int status;
+    int index=0;
+
+    size_t localX=16;
+    size_t localY=16;
+    size_t globalX=(width/localX)*localX;
+    size_t globalY=(height/localY)*localY;
+
+    if(globalX<width)
+        globalX+=localX;
+    if(globalY<height)
+        globalY+=localY;
+
+    int cacheX=(kernelXSize/2)*2+localX;
+    int cacheY=(kernelXSize/2)*2+localY;
+
+    status=kernel.setArg(index++, src);
+    status=kernel.setArg(index++, (int)width);
+    status=kernel.setArg(index++, (int)height);
+    status=kernel.setArg(index++, kernelXBuffer);
+    status=kernel.setArg(index++, kernelXSize);
+    status=kernel.setArg(index++, kernelYBuffer);
+    status=kernel.setArg(index++, kernelYSize);
+    status=kernel.setArg(index++, scale); //only scale once, so no scale here
+    status=kernel.setArg(index++, cacheX*cacheY*sizeof(float), nullptr); //setup local image cache
+
+    ::cl::NDRange globalThreads(globalX, globalY);
+    ::cl::NDRange localThreads(localX, localY);
+
+    status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, localThreads, events, &event);
 }
 
 ::cl::Buffer buildGaussianKernel(::cl::Context context, ::cl::CommandQueue commandQueue, float sigma, int &filterSize)

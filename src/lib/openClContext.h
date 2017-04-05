@@ -55,15 +55,15 @@ struct AKAZE_EXPORT OpenClDevice
 
 AKAZE_EXPORT std::vector<OpenClDevice> getDevices();
 
-AKAZE_EXPORT::cl::Context openDevice(OpenClDevice &selectedDevice);
+AKAZE_EXPORT ::cl::Context openDevice(OpenClDevice &selectedDevice);
 AKAZE_EXPORT ::cl::Context openDevice(std::string deviceName, OpenClDevice &deviceInfo);
 AKAZE_EXPORT ::cl::Context openDevice(std::string platform, std::string deviceName, OpenClDevice &deviceInfo);
 
 void saveBufferAsImage(::cl::CommandQueue commandQueue, ::cl::Buffer &clBuffer, size_t offset, size_t width, size_t height, std::string fileName, float minClip=std::numeric_limits<float>::lowest(), float maxClip=std::numeric_limits<float>::max());
 void loadBufferFromImage(::cl::CommandQueue commandQueue, ::cl::Buffer &clBuffer, size_t offset, size_t width, size_t height, std::string fileName);
 
-void saveImage2D(::cl::CommandQueue commandQueue, ::cl::Image2D &clImage, std::string fileName);
-void loadImage2D(::cl::CommandQueue commandQueue, ::cl::Image2D &clImage, std::string fileName);
+AKAZE_EXPORT void saveImage2D(::cl::CommandQueue commandQueue, ::cl::Image2D &clImage, std::string fileName);
+AKAZE_EXPORT void loadImage2D(::cl::CommandQueue commandQueue, ::cl::Image2D &clImage, std::string fileName);
 
 void saveImage2DData(::cl::CommandQueue commandQueue, ::cl::Image2D &clImage, std::string fileName);
 void loadImage2DData(::cl::CommandQueue commandQueue, ::cl::Image2D &clImage, std::string fileName);

@@ -8,6 +8,9 @@ find_package(Eigen3 REQUIRED)
 hunter_add_package(Jpeg)
 find_package(JPEG CONFIG REQUIRED)
 
+hunter_add_package(gflags)
+find_package(gflags CONFIG REQUIRED)
+
 find_package(Doxygen)
 find_package(CUDA)
 
@@ -232,6 +235,12 @@ endif()
 add_executable(akaze_features akaze_features.cpp commandLineHelper.cpp commandLineHelper.h)
 target_link_libraries(akaze_features ${AKAZE_LIBRARIES} AKAZE)
 create_target_launcher(akaze_features
+	RUNTIME_LIBRARY_DIRS ${AKAZE_Runtime_Directories} 
+)
+
+add_executable(benchmark benchmark.cpp benchmark_opencl.h benchmark_opencl.cpp)
+target_link_libraries(benchmark ${AKAZE_LIBRARIES} AKAZE gflags-static)
+create_target_launcher(benchmark
 	RUNTIME_LIBRARY_DIRS ${AKAZE_Runtime_Directories} 
 )
 

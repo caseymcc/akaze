@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 
 #include "cimg/CImg.h"
 
@@ -127,8 +128,11 @@ OpenCLContext *getOpenClContext(::cl::Context context)
     buildCommandline+=" -s ";
     buildCommandline+=path;
 #endif
-//    error=program.build(devices, buildCommandline.c_str());
-    error=program.build(devices, "");
+
+    if(openCLContext->deviceInfo.platform =="Experimental OpenCL 2.1 CPU Only Platform")
+        error=program.build(devices, buildCommandline.c_str());
+    else
+        error=program.build(devices, "");
 #else
     error=program.build(devices);
 #endif
@@ -139,10 +143,10 @@ OpenCLContext *getOpenClContext(::cl::Context context)
         {
             std::string str=program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(openCLContext->device);
 
-            printf(" \n\t\t\tBUILD LOG\n");
-            printf(" ************************************************\n");
-            printf(str.c_str());
-            printf(" ************************************************\n");
+            std::cout<<std::endl<<" BUILD LOG: "<<fileName<<std::endl;
+            std::cout<<" ************************************************"<<std::endl;
+            std::cout<<str.c_str();
+            std::cout<<" ************************************************"<<std::endl;
 
             return false;
         }
