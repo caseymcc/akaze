@@ -110,6 +110,61 @@ void separableConvolve(::cl::Context context, ::cl::CommandQueue commandQueue, :
 //    commandQueue.flush();
 }
 
+void separableConvolve_local(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Buffer kernelXBuffer, int kernelXSize,
+    ::cl::Buffer kernelYBuffer, int kernelYSize, float scale, ::cl::Image2D &dst, ::cl::Image2D &scratch, std::vector<::cl::Event> *events, ::cl::Event &event)
+{
+    size_t filterSize;
+
+    ::cl::Kernel kernelX=getKernel(context, "separableConvolveXImage2D_local", "lib/kernels/convolve.cl");
+    ::cl::Kernel kernelY=getKernel(context, "separableConvolveYImage2D_local", "lib/kernels/convolve.cl");
+    cl_int status;
+    int index=0;
+    ::cl::Event kernelYEvent;
+
+    size_t localX=16;
+    size_t localY=16;
+    size_t globalX=(width/localX)*localX;
+    size_t globalY=(height/localY)*localY;
+
+    if(globalX<width)
+        globalX+=localX;
+    if(globalY<height)
+        globalY+=localY;
+
+    int cacheX=(kernelXSize/2)*2+localX;
+    int cacheY=(kernelYSize/2)*2+localY;
+
+    status=kernelY.setArg(index++, src);
+    status=kernelY.setArg(index++, (int)width);
+    status=kernelY.setArg(index++, (int)height);
+    status=kernelY.setArg(index++, kernelYBuffer);
+    status=kernelY.setArg(index++, kernelYSize);
+    status=kernelY.setArg(index++, (float)1.0); //only scale once, so no scale here
+    status=kernelY.setArg(index++, scratch);
+    status=kernelY.setArg(index++, cacheX*cacheY*sizeof(float), nullptr); //setup local image cache
+
+    ::cl::NDRange globalThreads(globalX, globalY);
+    ::cl::NDRange localThreads(localX, localY);
+
+    status=commandQueue.enqueueNDRangeKernel(kernelY, ::cl::NullRange, globalThreads, localThreads, events, &kernelYEvent);
+
+    std::vector<::cl::Event> kernelYEvents={kernelYEvent};
+    index=0;
+
+    status=kernelX.setArg(index++, scratch);
+    status=kernelX.setArg(index++, (int)width);
+    status=kernelX.setArg(index++, (int)height);
+    status=kernelX.setArg(index++, kernelXBuffer);
+    status=kernelX.setArg(index++, kernelXSize);
+    status=kernelX.setArg(index++, scale);
+    status=kernelX.setArg(index++, dst);
+    status=kernelX.setArg(index++, cacheX*cacheY*sizeof(float), nullptr); //setup local image cache
+
+    status=commandQueue.enqueueNDRangeKernel(kernelX, ::cl::NullRange, globalThreads, localThreads, &kernelYEvents, &event);
+
+    //    commandQueue.flush();
+}
+
 void separableConvolve(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Buffer kernelXBuffer, int kernelXSize, 
     ::cl::Buffer kernelYBuffer, int kernelYSize, float scale, ::cl::Buffer &dst, size_t offset, ::cl::Image2D &scratch, std::vector<::cl::Event> *events, ::cl::Event &event)
 {
@@ -191,8 +246,8 @@ void separableConvolve(::cl::Context context, ::cl::CommandQueue commandQueue, :
 //    commandQueue.flush();
 }
 
-void separableConvolve_localXY(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Buffer kernelXBuffer, int kernelXSize,
-    ::cl::Buffer kernelYBuffer, int kernelYSize, float scale, ::cl::Image2D &dst, std::vector<::cl::Event> *events, ::cl::Event &event)
+void separableConvolve_localXY(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Buffer kernelXBuffer, ::cl::Buffer kernelYBuffer, 
+    int kernelSize, float scale, ::cl::Image2D &dst, std::vector<::cl::Event> *events, ::cl::Event &event)
 {
     ::cl::Kernel kernel=getKernel(context, "separableConvolveImage2DXY", "lib/kernels/convolve.cl");
     cl_int status;
@@ -208,17 +263,17 @@ void separableConvolve_localXY(::cl::Context context, ::cl::CommandQueue command
     if(globalY<height)
         globalY+=localY;
 
-    int cacheX=(kernelXSize/2)*2+localX;
-    int cacheY=(kernelXSize/2)*2+localY;
+    int cacheX=(kernelSize/2)*2+localX;
+    int cacheY=(kernelSize/2)*2+localY;
 
     status=kernel.setArg(index++, src);
     status=kernel.setArg(index++, (int)width);
     status=kernel.setArg(index++, (int)height);
     status=kernel.setArg(index++, kernelXBuffer);
-    status=kernel.setArg(index++, kernelXSize);
     status=kernel.setArg(index++, kernelYBuffer);
-    status=kernel.setArg(index++, kernelYSize);
-    status=kernel.setArg(index++, scale); //only scale once, so no scale here
+    status=kernel.setArg(index++, kernelSize);
+    status=kernel.setArg(index++, scale);
+    status=kernel.setArg(index++, dst);
     status=kernel.setArg(index++, cacheX*cacheY*sizeof(float), nullptr); //setup local image cache
 
     ::cl::NDRange globalThreads(globalX, globalY);
@@ -261,7 +316,7 @@ void separableConvolve_localXY(::cl::Context context, ::cl::CommandQueue command
     return filterBuffer;
 }
 
-::cl::Buffer buildGaussianSeparableKernel(::cl::Context context, ::cl::CommandQueue commandQueue, float sigma, int &kernelSize)
+::cl::Buffer buildGaussianSeparableKernel(::cl::Context context, float sigma, int &kernelSize)
 {
     int size=(int)ceil((1.0+(sigma-0.8)/(0.3)));
     float sum=0.0f;
@@ -317,7 +372,7 @@ void gaussianSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, :
 {
     int kernelSize;
 
-    ::cl::Buffer kernelBuffer=buildGaussianSeparableKernel(context, commandQueue, sigma, kernelSize);
+    ::cl::Buffer kernelBuffer=buildGaussianSeparableKernel(context, sigma, kernelSize);
 
 //    size_t width, height;
     cl_image_format format;
@@ -326,15 +381,22 @@ void gaussianSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, :
 //    src.getImageInfo(CL_IMAGE_HEIGHT, &height);
     src.getImageInfo(CL_IMAGE_FORMAT, &format);
 
-    ::cl::Image2D scratch(context, CL_MEM_READ_WRITE, ::cl::ImageFormat(format.image_channel_order, format.image_channel_data_type), width, height);
-
-    separableConvolve(context, commandQueue, src, width, height, kernelBuffer, kernelSize, kernelBuffer, kernelSize, 1.0, dst, scratch, events, event);
+//    ::cl::Image2D scratch(context, CL_MEM_READ_WRITE, ::cl::ImageFormat(format.image_channel_order, format.image_channel_data_type), width, height);
+//
+//    separableConvolve(context, commandQueue, src, width, height, kernelBuffer, kernelSize, kernelBuffer, kernelSize, 1.0, dst, scratch, events, event);
+    separableConvolve_localXY(context, commandQueue, src, width, height, kernelBuffer, kernelBuffer, kernelSize, 1.0, dst, events, event);
 }
 
 void gaussianSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, ::cl::Image2D &dst, size_t width, size_t height, ::cl::Buffer kernelBuffer, int kernelSize, ::cl::Image2D scratch, 
     std::vector<::cl::Event> *events, ::cl::Event &event)
 {
     separableConvolve(context, commandQueue, src, width, height, kernelBuffer, kernelSize, kernelBuffer, kernelSize, 1.0, dst, scratch, events, event);
+}
+
+void gaussianSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, ::cl::Image2D &dst, size_t width, size_t height, ::cl::Buffer kernelBuffer, int kernelSize,
+    std::vector<::cl::Event> *events, ::cl::Event &event)
+{
+    separableConvolve_localXY(context, commandQueue, src, width, height, kernelBuffer, kernelBuffer, kernelSize, 1.0, dst, events, event);
 }
 
 ::cl::Buffer buildScharrFilter(::cl::Context context, int scale)

@@ -156,25 +156,25 @@ void AKAZE::Allocate_Memory_Evolution()
 
     event.wait();
 
-    offsetGuassian_=buildGaussianSeparableKernel(openclContext_, commandQueue_, options_.soffset, offsetGuassianSize_);
-    contrastGuassian_=buildGaussianSeparableKernel(openclContext_, commandQueue_, 1.0, contrastGuassianSize_);
+    offsetGuassian_=buildGaussianSeparableKernel(openclContext_, options_.soffset, offsetGuassianSize_);
+    contrastGuassian_=buildGaussianSeparableKernel(openclContext_, 1.0, contrastGuassianSize_);
     contrastScharr_=buildScharrSeparableKernel(openclContext_, 1, contrastScharrSize_, false);
 
     histogram_.resize(options_.kcontrast_nbins);
     histogramBuffer_=::cl::Buffer(openclContext_, CL_MEM_READ_WRITE, sizeof(cl_float)*histogram_.size());
 
-    commandQueue_.enqueueWriteBuffer(histogramBuffer_, CL_FALSE, 0, histogram_.size()*sizeof(cl_float), histogram_.data(), nullptr, &event);
+//    commandQueue_.enqueueWriteBuffer(histogramBuffer_, CL_FALSE, 0, histogram_.size()*sizeof(cl_float), histogram_.data(), nullptr, &event);
+//    event.wait();
 
     maxBuffer_=::cl::Buffer(openclContext_, CL_MEM_READ_WRITE, sizeof(float));
+    contrastBuffer_=::cl::Buffer(openclContext_, CL_MEM_READ_WRITE, sizeof(float));
     histogramScratchBuffer_=::cl::Buffer(openclContext_, CL_MEM_READ_WRITE, sizeof(cl_int)*evolution_[0].height*options_.kcontrast_nbins);
 
     contrastGuassianScratch_=::cl::Image2D(openclContext_, CL_MEM_READ_WRITE, ::cl::ImageFormat(CL_R, CL_FLOAT), evolution_[0].width, evolution_[0].height);
     contrastMagnitudeScratch_=::cl::Image2D(openclContext_, CL_MEM_READ_WRITE, ::cl::ImageFormat(CL_R, CL_FLOAT), evolution_[0].width, evolution_[0].height);
 
-    event.wait();
-
-    //opencl has lazy buffer initialization so these buffers will not be created till used, this forces their creation
-    std::vector<::cl::Event> events(11);
+//opencl has lazy buffer initialization so these buffers will not be created till used, this forces their creation
+    std::vector<::cl::Event> events(13);
 
     zeroFloatBuffer(openclContext_, commandQueue_, evolutionImage_, bufferSize, nullptr, events[0]);
     zeroFloatBuffer(openclContext_, commandQueue_, evolutionDx_, bufferSize, nullptr, events[1]);
@@ -189,10 +189,12 @@ void AKAZE::Allocate_Memory_Evolution()
 //    zeroBuffer(openclContext_, commandQueue_, extremaMap_, bufferSize*sizeof(ExtremaMap), nullptr, events[8]);
 //    events[8].wait();
     zeroFloatBuffer(openclContext_, commandQueue_, maxBuffer_, 1, nullptr, events[7]);
-    zeroIntBuffer(openclContext_, commandQueue_, histogramScratchBuffer_, evolution_[0].height*options_.kcontrast_nbins, nullptr, events[8]);
+    zeroFloatBuffer(openclContext_, commandQueue_, contrastBuffer_, 1, nullptr, events[8]);
+    zeroIntBuffer(openclContext_, commandQueue_, histogramBuffer_, options_.kcontrast_nbins*sizeof(cl_int), nullptr, events[9]);
+    zeroIntBuffer(openclContext_, commandQueue_, histogramScratchBuffer_, evolution_[0].height*options_.kcontrast_nbins*sizeof(cl_int), nullptr, events[10]);
 
-    zeroImage(openclContext_, commandQueue_, contrastGuassianScratch_, nullptr, events[9]);
-    zeroImage(openclContext_, commandQueue_, contrastMagnitudeScratch_, nullptr, events[10]);
+    zeroImage(openclContext_, commandQueue_, contrastGuassianScratch_, nullptr, events[11]);
+    zeroImage(openclContext_, commandQueue_, contrastMagnitudeScratch_, nullptr, events[12]);
 
     ::cl::WaitForEvents(events);
 }
@@ -238,20 +240,20 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
 //    float kcontrast=computeKPercentile(openclContext_, commandQueue_, evolution_[0].image, options_.kcontrast_percentile, 1.0, options_.kcontrast_nbins, 0, 0);
     float kcontrast;
 
-    computeKPercentile(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].width, evolution_[0].height, options_.kcontrast_nbins,
+    computeKPercentile(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].width, evolution_[0].height, options_.kcontrast_nbins, options_.kcontrast_percentile,
         contrastGuassianScratch_, contrastMagnitudeScratch_, histogramBuffer_, histogramScratchBuffer_, contrastGuassian_, contrastGuassianSize_, evolution_[0].scratch,
-        evolution_[0].lx, evolution_[0].ly, contrastScharr_, contrastScharrSize_, maxBuffer_, &writeImageEvents, contrastWaitEvents[0]);
+        evolution_[0].lx, evolution_[0].ly, contrastScharr_, contrastScharrSize_, maxBuffer_, contrastBuffer_, &writeImageEvents, contrastWaitEvents[0]);
     
     float histogramMax;
-    std::vector<::cl::Event> readHistogramEvents(2);
-
-    commandQueue_.enqueueReadBuffer(maxBuffer_, false, 0, sizeof(float), &histogramMax, &contrastWaitEvents, &readHistogramEvents[0]);
-    commandQueue_.enqueueReadBuffer(histogramBuffer_, false, 0, sizeof(cl_int)*histogram_.size(), histogram_.data(), &contrastWaitEvents, &readHistogramEvents[1]);
+//    std::vector<::cl::Event> readHistogramEvents(2);
+//
+//    commandQueue_.enqueueReadBuffer(maxBuffer_, false, 0, sizeof(float), &histogramMax, &contrastWaitEvents, &readHistogramEvents[0]);
+//    commandQueue_.enqueueReadBuffer(histogramBuffer_, false, 0, sizeof(cl_int)*histogram_.size(), histogram_.data(), &contrastWaitEvents, &readHistogramEvents[1]);
 
     bool contrastLoaded=false;
     timing_.kcontrast=timer.elapsedMs();
 
-    copyEvent.wait();
+//    copyEvent.wait();
 
     for(size_t i=1; i<evolution_.size(); i++)
     {
@@ -264,7 +266,7 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
             linearSample(openclContext_, commandQueue_, evolution_[i-1].image, evolution_[i].image, evolution_[i].width, evolution_[i].height, nullptr, copyImageEvent);
             copyImageWaitEvent.push_back(copyImageEvent);
 
-            kcontrast=kcontrast*0.75;
+//            kcontrast=kcontrast*0.75;
         }
         else
         {
@@ -275,7 +277,14 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
             region[1]=evolution_[i].height;
             region[2]=1;
 
-            commandQueue_.enqueueCopyImage(evolution_[i-1].image, evolution_[i].image, origin, origin, region, nullptr, &copyImageEvent);
+            if(i==1)
+            {
+                std::vector<::cl::Event> firstCopy={copyEvent};
+
+                commandQueue_.enqueueCopyImage(evolution_[i-1].image, evolution_[i].image, origin, origin, region, &firstCopy, &copyImageEvent);
+            }
+            else
+                commandQueue_.enqueueCopyImage(evolution_[i-1].image, evolution_[i].image, origin, origin, region, nullptr, &copyImageEvent);
             copyImageWaitEvent.push_back(copyImageEvent);
         }
 
@@ -294,23 +303,23 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
         scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, 1, 1.0, false, false, evolution_[i].lx, &gaussWaitEvent, derivativeXEvent);
         scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, 1, 1.0, true, false, evolution_[i].ly, &gaussWaitEvent, derivativeYEvent);
 
-        std::vector<::cl::Event>derivativeWaitEvent={derivativeXEvent, derivativeYEvent};
+        std::vector<::cl::Event>derivativeWaitEvent={derivativeXEvent, derivativeYEvent, contrastWaitEvents[0]};
         ::cl::Event diffusivityEvent;
 
-        if(!contrastLoaded)
-        {
-            ::cl::WaitForEvents(readHistogramEvents);
-            kcontrast=computeContrast(histogram_, histogramMax, options_.kcontrast_percentile);
-            contrastLoaded=true;
-        }
+//        if(!contrastLoaded)
+//        {
+//            ::cl::WaitForEvents(readHistogramEvents);
+//            kcontrast=computeContrast(histogram_, histogramMax, options_.kcontrast_percentile);
+//            contrastLoaded=true;
+//        }
 
         switch(options_.diffusivity)
         {
         case PM_G1:
-            pmG1(openclContext_, commandQueue_, evolution_[i].lx, evolution_[i].ly, evolution_[i].flow, evolution_[i].width, evolution_[i].height, kcontrast, &derivativeWaitEvent, diffusivityEvent);
+//            pmG1(openclContext_, commandQueue_, evolution_[i].lx, evolution_[i].ly, evolution_[i].flow, evolution_[i].width, evolution_[i].height, i, contrastBuffer_, &derivativeWaitEvent, diffusivityEvent);
             break;
         case PM_G2:
-            pmG2(openclContext_, commandQueue_, evolution_[i].lx, evolution_[i].ly, evolution_[i].flow, evolution_[i].width, evolution_[i].height, kcontrast, &derivativeWaitEvent, diffusivityEvent);
+            pmG2(openclContext_, commandQueue_, evolution_[i].lx, evolution_[i].ly, evolution_[i].flow, evolution_[i].width, evolution_[i].height, i, contrastBuffer_, &derivativeWaitEvent, diffusivityEvent);
             break;
         case WEICKERT:
             break;
@@ -454,6 +463,16 @@ void AKAZE::Feature_Detection(std::vector<libAKAZE::Keypoint> &kpts)
     Compute_Determinant_Hessian_Response();
     Find_Scale_Space_Extrema(kpts);
 //    Do_Subpixel_Refinement(kpts);
+    timing_.detector=timer.elapsedMs();
+}
+
+void AKAZE::Feature_Detection()
+{
+    timer::Timer timer;
+
+    Compute_Determinant_Hessian_Response();
+    Find_Scale_Space_Extrema();
+
     timing_.detector=timer.elapsedMs();
 }
 
@@ -751,25 +770,32 @@ void AKAZE::Compute_Descriptors(std::vector<libAKAZE::Keypoint> &kpts, Descripto
 
 void AKAZE::Compute_Descriptors(Descriptors &desc)
 {
-    size_t descriptorSize;
+    Compute_Descriptors();
+    getDescriptors(desc);
+}
+
+void AKAZE::Compute_Descriptors()
+{
     timer::Timer timer;
 
     //alocate space for descriptors
-    if(options_.descriptor < MLDB_UPRIGHT)
-        desc.float_descriptor.resize(keypointsCount_);
+    if(options_.descriptor<MLDB_UPRIGHT)
+    {
+//        desc.float_descriptor.resize(keypointsCount_);
+    }
     else
     {
         // We use the full length binary descriptor -> 486 bits
         if(options_.descriptor_size==0)
-            descriptorSize=(6+36+120) * options_.descriptor_channels;
+            descriptorSize_=(6+36+120) * options_.descriptor_channels;
         else
-            descriptorSize=options_.descriptor_size;
+            descriptorSize_=options_.descriptor_size;
 
-        descriptorSize=ceil((float)descriptorSize/8);
-        desc.binaryResize(keypointsCount_, descriptorSize);
+        descriptorSize_=ceil((float)descriptorSize_/8);
+//        desc.binaryResize(keypointsCount_, descriptorSize);
 
         //allocate opencl uffer
-        descriptorBufferSize_=descriptorSize*keypointsCount_;
+        descriptorBufferSize_=descriptorSize_*keypointsCount_;
 
         descriptorsBuffer_=::cl::Buffer(openclContext_, CL_MEM_READ_WRITE, descriptorBufferSize_);
     }
@@ -791,19 +817,19 @@ void AKAZE::Compute_Descriptors(Descriptors &desc)
         {
             Compute_Main_Orientation();
             Get_MLDB_Full_Descriptor();
-
-            std::vector<unsigned char> descriptorBuffer(descriptorBufferSize_);
-            ::cl::Event event;
-
-            commandQueue_.enqueueReadBuffer(descriptorsBuffer_, CL_FALSE, 0, descriptorBuffer.size(), descriptorBuffer.data(), nullptr, &event);
-            event.wait();
-
-            size_t index=0;
-            for(int i=0; i<(int)(keypointsCount_); i++)
-            {
-                memcpy(desc.binaryData(), &descriptorBuffer[index], descriptorSize);
-                index+=descriptorSize;
-            }
+//
+//            std::vector<unsigned char> descriptorBuffer(descriptorBufferSize_);
+//            ::cl::Event event;
+//
+//            commandQueue_.enqueueReadBuffer(descriptorsBuffer_, CL_FALSE, 0, descriptorBuffer.size(), descriptorBuffer.data(), nullptr, &event);
+//            event.wait();
+//
+//            size_t index=0;
+//            for(int i=0; i<(int)(keypointsCount_); i++)
+//            {
+//                memcpy(desc.binaryData(), &descriptorBuffer[index], descriptorSize);
+//                index+=descriptorSize;
+//            }
         }
         break;
     }
@@ -931,6 +957,27 @@ void AKAZE::Save_Keypoints(std::string fileName)
     event.wait();
     fwrite(keypoints.data(), sizeof(cl::Keypoint), keypoints.size(), file);
     fclose(file);
+}
+
+void AKAZE::getDescriptors(Descriptors &desc)
+{
+    std::vector<unsigned char> descriptorBuffer(descriptorBufferSize_);
+    ::cl::Event event;
+
+    if(options_.descriptor < MLDB_UPRIGHT)
+        desc.float_descriptor.resize(keypointsCount_);
+    else
+        desc.binaryResize(keypointsCount_, descriptorSize_);
+
+    commandQueue_.enqueueReadBuffer(descriptorsBuffer_, CL_FALSE, 0, descriptorBuffer.size(), descriptorBuffer.data(), nullptr, &event);
+    event.wait();
+
+    size_t index=0;
+    for(int i=0; i<(int)(keypointsCount_); i++)
+    {
+        memcpy(desc.binaryData(), &descriptorBuffer[index], descriptorSize_);
+        index+=descriptorSize_;
+    }
 }
 
 void AKAZE::Show_Computation_Times() const

@@ -64,6 +64,7 @@ void loadBufferFromImage(::cl::CommandQueue commandQueue, ::cl::Buffer &clBuffer
 
 AKAZE_EXPORT void saveImage2D(::cl::CommandQueue commandQueue, ::cl::Image2D &clImage, std::string fileName);
 AKAZE_EXPORT void loadImage2D(::cl::CommandQueue commandQueue, ::cl::Image2D &clImage, std::string fileName);
+AKAZE_EXPORT ::cl::Image2D loadImage2D(::cl::Context context, ::cl::CommandQueue commandQueue, std::string fileName);
 
 void saveImage2DData(::cl::CommandQueue commandQueue, ::cl::Image2D &clImage, std::string fileName);
 void loadImage2DData(::cl::CommandQueue commandQueue, ::cl::Image2D &clImage, std::string fileName);

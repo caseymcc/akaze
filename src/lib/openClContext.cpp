@@ -145,7 +145,7 @@ OpenCLContext *getOpenClContext(::cl::Context context)
 
             std::cout<<std::endl<<" BUILD LOG: "<<fileName<<std::endl;
             std::cout<<" ************************************************"<<std::endl;
-            std::cout<<str.c_str();
+            std::cout<<str;
             std::cout<<" ************************************************"<<std::endl;
 
             return false;
@@ -650,6 +650,32 @@ void loadImage2D(::cl::CommandQueue commandQueue, ::cl::Image2D &clImage, std::s
 
     commandQueue.enqueueWriteImage(clImage, CL_FALSE, origin, region, 0, 0, image._data, nullptr, &event);
     event.wait();
+}
+
+::cl::Image2D loadImage2D(::cl::Context context, ::cl::CommandQueue commandQueue, std::string fileName)
+{
+    size_t width, height;
+    cimg_library::CImg<float> image(fileName.c_str());
+    
+    ::cl::Image2D imageCL=::cl::Image2D(context, CL_MEM_READ_WRITE, ::cl::ImageFormat(CL_R, CL_FLOAT), image.width(), image.height());
+
+    ::cl::size_t<3> origin;
+    ::cl::size_t<3> region;
+
+    origin[0]=0;
+    origin[1]=0;
+    origin[2]=0;
+
+    region[0]=width;
+    region[1]=height;
+    region[2]=1;
+
+    ::cl::Event event;
+
+    commandQueue.enqueueWriteImage(imageCL, CL_FALSE, origin, region, 0, 0, image._data, nullptr, &event);
+    event.wait();
+
+    return imageCL;
 }
 
 void loadImage2DData(::cl::CommandQueue commandQueue, ::cl::Image2D &clImage, std::string fileName, ::cl::Event &event)

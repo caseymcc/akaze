@@ -101,142 +101,167 @@ __kernel void convolve(read_only image2d_t input, __constant float *kernelBuffer
     write_imagef(output, (int2)(xOutput, yOutput), sum);
 }
 
-void copyToLocal(read_only image2d_t input, int width, int height, int border)
-{
-}
-
-__kernel void separableConvolveImage2DXY(read_only image2d_t input, int width, int height, __constant float *kernelX, __constant float *kernelY, int kernelSize, float scale, write_only image2d_t output, __local float *imageCache)
+void copyToLocal(read_only image2d_t input, int width, int height, int border, int localX, int localY, __local float *imageCache, int *imageCacheX, int *imageCacheY)
 {
     const sampler_t nearestClampSampler=CLK_NORMALIZED_COORDS_FALSE|CLK_FILTER_NEAREST|CLK_ADDRESS_CLAMP_TO_EDGE;
-
-    const int globalX=get_global_id(0);
-    const int globalY=get_global_id(1);
+    
     const int groupX=get_group_id(0);
     const int groupY=get_group_id(1);
-    const int localX=get_local_id(0);
-    const int localY=get_local_id(1);
     const int localSizeX=get_local_size(0);
     const int localSizeY=get_local_size(1);
-    
-    const int halfKernelSize=kernelSize/2;
-    int imageCacheX=localSizeX+(2*halfKernelSize);
-    int imageCacheY=localSizeY+(2*halfKernelSize);
 
-    const int imageX=(groupX*localSizeX)-halfKernelSize;
-    const int imageY=(groupY*localSizeY)-halfKernelSize;
+    const int imageX=(groupX*localSizeX)-border;
+    const int imageY=(groupY*localSizeY)-border;
 
-    if(imageX+imageCacheX >= width)
-        imageCacheX=width-imageX+1;
-    if(imageY+imageCacheY >= height)
-        imageCacheY=height-imageY+1;
+    int imgCacheX=localSizeX+(2*border);
+    int imgCacheY=localSizeY+(2*border);
 
-    const int imageCacheSize=imageCacheX*imageCacheY;
+    if(imageX+imgCacheX>=width)
+        imgCacheX=width-imageX+1;
+    if(imageY+imgCacheY>=height)
+        imgCacheY=height-imageY+1;
 
+    const int imageCacheSize=imgCacheX*imgCacheY;
     const int perItemCache=ceil((float)imageCacheSize/(localSizeX*localSizeY));
     const int cacheIndex=((localY*localSizeX)+localX)*perItemCache;
 
     if(cacheIndex < imageCacheSize)
     {
-        int indexY=imageY+cacheIndex/imageCacheX;
-        int indexX=cacheIndex-(indexY*imageCacheX);
+        const int cacheY=cacheIndex/imgCacheX;
+        const int indexY=imageY+cacheY;
+        int indexX=imageX+cacheIndex-(cacheY*imgCacheX);
 
         for(int i=0; i<perItemCache; ++i)
         {
             imageCache[cacheIndex+i]=read_imagef(input, nearestClampSampler, (int2)(indexX, indexY)).x;
             indexX++;
-
-            if(indexX>imageCacheX)
-            {
-                indexX=imageX;
-                indexY++;
-            }
         }
     }
 
+    (*imageCacheX)=imgCacheX;
+    (*imageCacheY)=imgCacheY;
+
     barrier(CLK_LOCAL_MEM_FENCE);
+}
+
+__kernel void separableConvolveImage2DXY(read_only image2d_t input, int width, int height, __constant float *kernelX, __constant float *kernelY, int kernelSize, float scale, write_only image2d_t output, __local float *imageCache)
+{
+    const int globalX=get_global_id(0);
+    const int globalY=get_global_id(1);
+    const int localX=get_local_id(0);
+    const int localY=get_local_id(1);
+    const int halfKernelSize=kernelSize/2;
+
+    int imageCacheX;
+    int imageCacheY;
+
+    copyToLocal(input, width, height, halfKernelSize, localX, localY, imageCache, &imageCacheX, &imageCacheY);
     
     if((globalX>=width)||(globalY>=height))
         return;
     
-    //perform convolve on X
-    const int posY=localY*2;
+//    {
+//        int cachePos=((localY+halfKernelSize)*imageCacheX)+localX+halfKernelSize;
+//
+//        write_imagef(output, (int2)(globalX, globalY), imageCache[cachePos]);
+//        return;
+//    }
 
-    if(posY<localSizeY)
+//perform convolve on X
+    const int posY=localY*2;
+    float2 sum2=0.0f;
+
+    if(posY<imageCacheY)
     {
         int cachePos=(posY*imageCacheX)+localX;
-        float2 sum=0.0f;
 
-        for(int x=0; x<kernelSize; x++)
+        for(int i=0; i<kernelSize; i++)
         {
             float2 value=(float2)(imageCache[cachePos], imageCache[cachePos+imageCacheX]);
 
-            sum+=kernelX[x]*value;
+            sum2+=kernelX[i]*value;
             cachePos++;
         }
     }
 
-    barrier(CLK_LOCAL_MEM_FENCE);
-    //perform convolve on Y
+    int cachePos=((posY)*imageCacheX)+localX+halfKernelSize;
 
-    int cachePos=(localY*imageCacheX)+localX;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if(posY<imageCacheY)
+    {
+        imageCache[cachePos]=sum2.x;
+        imageCache[cachePos+imageCacheX]=sum2.y;
+    }
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+//    cachePos=((localY+halfKernelSize)*imageCacheX)+localX+halfKernelSize;
+//    write_imagef(output, (int2)(globalX, globalY), imageCache[cachePos]);
+
+//perform convolve on Y
+    cachePos=(localY*imageCacheX)+localX+halfKernelSize;
     float sum=0.0f;
 
-    for(int x=0; x<kernelSize; x++)
+    for(int i=0; i<kernelSize; i++)
     {
         float value=imageCache[cachePos];
 
-        sum+=kernelX[x]*value;
+        sum+=kernelY[i]*value;
+        cachePos+=imageCacheX;
     }
+
+    sum=sum*scale;
+    write_imagef(output, (int2)(globalX, globalY), sum);
 }
 
 __kernel void separableConvolveXImage2D(read_only image2d_t input, __constant float *kernelX, int kernelSize, float scale, write_only image2d_t output)
 {
     const sampler_t nearestClampSampler=CLK_NORMALIZED_COORDS_FALSE|CLK_FILTER_NEAREST|CLK_ADDRESS_CLAMP_TO_EDGE;
 
-    const int xOutput=get_global_id(0);
-    const int yOutput=get_global_id(1);
+    const int globalX=get_global_id(0);
+    const int globalY=get_global_id(1);
 
     float sum=0;
     int filterOffset=kernelSize/2;
-    int xInput=xOutput-filterOffset;
+    int xInput=globalX-filterOffset;
 
     for(int x=0; x<kernelSize; x++)
     {
-        float value=read_imagef(input, nearestClampSampler, (int2)(xInput+x, yOutput)).x;
+        float value=read_imagef(input, nearestClampSampler, (int2)(xInput+x, globalY)).x;
 
         sum+=kernelX[x]*value;
     }
 
     sum=sum*scale;
-    write_imagef(output, (int2)(xOutput, yOutput), sum);
+    write_imagef(output, (int2)(globalX, globalY), sum);
 }
 
-//__kernel void separableConvolveXImage2D(read_only image2d_t input, int width, __constant float *kernelX, const int kernelSize, float scale, write_only image2d_t output)
-//{
-//    const sampler_t nearestClampSampler=CLK_NORMALIZED_COORDS_FALSE|CLK_FILTER_NEAREST|CLK_ADDRESS_CLAMP_TO_EDGE;
-//
-//    const int xOutput=get_global_id(0);
-//
-//    float sum=0;
-//    int filterOffset=kernelSize/2;
-//    int xInput=xOutput-filterOffset;
-//
-//    __local float cache[32];
-//    int pos=0;
-//
-//    for(int i=0; i<filterOffset; i++)
-//        cache[pos]=read_imagef(input, nearestClampSampler, (int2)(xInput+x, yOutput)).x;
-//
-//    for(int x=0; x<kernelSize; x++)
-//    {
-//        float value=read_imagef(input, nearestClampSampler, (int2)(xInput+x, yOutput)).x;
-//
-//        sum+=kernelX[x]*value;
-//    }
-//
-//    sum=sum*scale;
-//    write_imagef(output, (int2)(xOutput, yOutput), sum);
-//}
+__kernel void separableConvolveXImage2D_local(read_only image2d_t input, int width, int height, __constant float *kernelBuffer, int kernelSize, float scale, write_only image2d_t output, __local float *imageCache)
+{
+    const int xOutput=get_global_id(0);
+    const int yOutput=get_global_id(1);
+    const int localX=get_local_id(0);
+    const int localY=get_local_id(1);
+
+    const int halfKernelSize=kernelSize/2;
+    int imageCacheX;
+    int imageCacheY;
+
+    copyToLocal(input, width, height, halfKernelSize, localX, localY, imageCache, &imageCacheX, &imageCacheY);
+
+    int cachePos=((localY+halfKernelSize)*imageCacheX)+localX;
+    float sum=0.0f;
+
+    for(int i=0; i<kernelSize; i++)
+    {
+        sum+=kernelBuffer[i]*imageCache[cachePos];
+        cachePos++;
+    }
+
+    sum=sum*scale;
+    write_imagef(output, (int2)(xOutput, yOutput), sum);
+}
 
 __kernel void separableConvolveXImage2DBuffer(read_only image2d_t input, __constant float *kernelX, const int kernelSize, float scale, __global float *output, int offset, int width, int height)
 {
@@ -322,6 +347,32 @@ __kernel void separableConvolveYImage2D(read_only image2d_t input, __constant fl
         float value=read_imagef(input, nearestClampSampler, (int2)(xOutput, yInput+y)).x;
         
         sum+=kernelY[y]*value;
+    }
+
+    sum=sum*scale;
+    write_imagef(output, (int2)(xOutput, yOutput), sum);
+}
+
+__kernel void separableConvolveYImage2D_local(read_only image2d_t input, int width, int height, __constant float *kernelBuffer, int kernelSize, float scale, write_only image2d_t output, __local float *imageCache)
+{
+    const int xOutput=get_global_id(0);
+    const int yOutput=get_global_id(1);
+    const int localX=get_local_id(0);
+    const int localY=get_local_id(1);
+
+    const int halfKernelSize=kernelSize/2;
+    int imageCacheX;
+    int imageCacheY;
+
+    copyToLocal(input, width, height, halfKernelSize, localX, localY, imageCache, &imageCacheX, &imageCacheY);
+
+    int cachePos=(localY*imageCacheX)+localX+halfKernelSize;
+    float sum=0.0f;
+
+    for(int i=0; i<kernelSize; i++)
+    {
+        sum+=kernelBuffer[i]*imageCache[cachePos];
+        cachePos+=imageCacheX;
     }
 
     sum=sum*scale;
@@ -478,16 +529,47 @@ __kernel void histogramRows(read_only image2d_t input, int width, int height, in
 //        output[stride+i]=accumulator[accumulatorStride+i];
 }
 
-__kernel void histogramCombine(__global int *input, int bins, int count, __global int *output)
+//__kernel void histogramCombine(__global int *input, int bins, int count, __global int *output)
+//{
+//    const int bin=get_global_id(0);
+////    const int stride=bins*bin;
+//    int value=0;
+//
+//    for(int i=0; i<count; i++)
+//        value+=input[bins*i+bin];
+//
+//    output[bin]=value;
+//}
+
+__kernel void histogramCombine(__global int *input, int bins, int count, float percent, __global float *maxValue, __global int *histogram, __global float *contrast)
 {
     const int bin=get_global_id(0);
-//    const int stride=bins*bin;
+    //    const int stride=bins*bin;
     int value=0;
 
     for(int i=0; i<count; i++)
         value+=input[bins*i+bin];
 
-    output[bin]=value;
+    histogram[bin]=value;
+
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    int points=0;
+    float perc=0.03;
+    int threshold=(int)(points*percent);
+    int elements=0;
+    int i;
+
+    for(size_t i=0; i<bins; ++i)
+        points+=histogram[i];
+
+    for(i=0; elements < threshold && i < bins; i++)
+        elements=elements+histogram[i];
+
+    if(elements>=threshold)
+        perc=maxValue[0] * ((float)(i)/(float)bins);
+    
+    (*contrast)=perc;
 }
 
 __kernel void linearSample(read_only image2d_t input, write_only image2d_t output, int outputWidth, int outputHeight)
@@ -518,11 +600,13 @@ __kernel void pmG1(read_only image2d_t input1, read_only image2d_t input2, write
     write_imagef(output, (int2)(outputX, outputY), value);
 }
 
-__kernel void pmG2(read_only image2d_t input1, read_only image2d_t input2, write_only image2d_t output, float k)
+//__kernel void pmG2(read_only image2d_t input1, read_only image2d_t input2, write_only image2d_t output, float k)
+__kernel void pmG2(read_only image2d_t input1, read_only image2d_t input2, write_only image2d_t output, int index, __global float *contrast)
 {
     const sampler_t nearestClampSampler=CLK_NORMALIZED_COORDS_FALSE|CLK_FILTER_NEAREST|CLK_ADDRESS_CLAMP_TO_EDGE;
     const int outputX=get_global_id(0);
     const int outputY=get_global_id(1);
+    const float k=contrast[0]*pow(0.75, index);
     const float inv_k=1.0/(k * k);
 
     float value1=read_imagef(input1, nearestClampSampler, (int2)(outputX, outputY)).x;

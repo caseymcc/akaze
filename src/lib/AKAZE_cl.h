@@ -101,6 +101,7 @@ public:
 
     int Create_Nonlinear_Scale_Space(const RowMatrixXf &img);
     void Feature_Detection(std::vector<libAKAZE::Keypoint> &kpts);
+    void Feature_Detection();
 
     void Load_Nonlinear_Scale_Space(std::string &directory);
     void Save_Nonlinear_Scale_Space(std::string &directory);
@@ -117,12 +118,15 @@ public:
 
     void Compute_Descriptors(std::vector<libAKAZE::Keypoint> &kpts, Descriptors &desc);
     void Compute_Descriptors(Descriptors &desc);
+    void Compute_Descriptors();
 
     void Load_Keypoints(std::string fileName);
     void Save_Keypoints(std::string fileName);
 
     void getKeypoints(std::vector<libAKAZE::Keypoint> &kpts);
     void putKeypoints(std::vector<libAKAZE::Keypoint> &kpts);
+
+    void getDescriptors(Descriptors &desc);
 
 	void saveDebug();
 
@@ -178,12 +182,14 @@ private:
     std::vector<int> histogram_;
     ::cl::Buffer histogramScratchBuffer_;
     ::cl::Buffer maxBuffer_;
+    ::cl::Buffer contrastBuffer_;
 
     ::cl::Buffer keypointsBuffer_;
     int keypointsCount_;
 
     ::cl::Buffer descriptorsBuffer_;
     size_t descriptorBufferSize_;
+    size_t descriptorSize_;
 
     ::cl::Buffer extremaMap_;
     
