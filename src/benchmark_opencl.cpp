@@ -253,19 +253,21 @@ void benchmarkOpenCLAKAZE(::cl::Context &context, ::cl::CommandQueue &queue, Opt
 
     evolution.initOpenCL(); //gets some items loaded early
 
+//    evolution.Create_Nonlinear_Scale_Space(image);
+
     timer.reset();
 
     evolution.Create_Nonlinear_Scale_Space(image);
-    evolution.Feature_Detection();
-    evolution.Compute_Descriptors();
+//    evolution.Feature_Detection();
+//    evolution.Compute_Descriptors();
 
     totalTime=timer.elapsedMs();
 
     std::vector<libAKAZE::Keypoint> kpts;
     libAKAZE::Descriptors desc;
 
-    evolution.getKeypoints(kpts);
-    evolution.getDescriptors(desc);
+//    evolution.getKeypoints(kpts);
+//    evolution.getDescriptors(desc);
 
     std::cout<<"Number of points: "<<kpts.size()<<std::endl;
     evolution.Show_Computation_Times();

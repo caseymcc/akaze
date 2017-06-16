@@ -100,18 +100,19 @@ void calculateHistogram(::cl::Context &context, ::cl::CommandQueue &commandQueue
     status=kernelHistogramRows.setArg(index++, bins);
     status=kernelHistogramRows.setArg(index++, maxValueBuffer);
     status=kernelHistogramRows.setArg(index++, scratchBuffer);
-//    status=kernelHistogramRows.setArg(index++, items*bins, nullptr);
-//
-//    int workGroups=ceil((float)height/items);
-//    int workItems=items*workGroups;
-//
-//    ::cl::NDRange globalThreads(workItems);
-//    ::cl::NDRange localThreads(items);
-//
-//    status=commandQueue.enqueueNDRangeKernel(kernelHistogramRows, ::cl::NullRange, globalThreads, localThreads, events, &histogramRowEvent);
-    ::cl::NDRange globalThreads(height);
+    status=kernelHistogramRows.setArg(index++, items*bins, nullptr);
 
-    status=commandQueue.enqueueNDRangeKernel(kernelHistogramRows, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &histogramRowEvent);
+    int workGroups=ceil((float)height/items);
+    int workItems=items*workGroups;
+
+    ::cl::NDRange globalThreads(workItems);
+    ::cl::NDRange localThreads(items);
+
+    status=commandQueue.enqueueNDRangeKernel(kernelHistogramRows, ::cl::NullRange, globalThreads, localThreads, events, &histogramRowEvent);
+    
+//    ::cl::NDRange globalThreads(height);
+//
+//    status=commandQueue.enqueueNDRangeKernel(kernelHistogramRows, ::cl::NullRange, globalThreads, ::cl::NullRange, events, &histogramRowEvent);
 
     std::vector<::cl::Event> histogramRowCompleteEvent={histogramRowEvent};
     
@@ -280,6 +281,39 @@ float computeContrast(std::vector<int> &histogram, float hmax, float perc)
         kperc=hmax * ((float)(k)/(float)nbins);
 
     return kperc;
+}
+
+void computeFlow(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &input, size_t width, size_t height, ::cl::Image2D &output, int diffusivity, size_t constrastIndex,
+    ::cl::Buffer &contrastBuffer, std::vector<::cl::Event> *events, ::cl::Event &event)
+{
+    ::cl::Kernel kernel=getKernel(context, "computeFlow", "lib/kernels/contrast.cl");
+    
+    size_t localX=16;
+    size_t localY=16;
+    size_t globalX=(width/localX)*localX;
+    size_t globalY=(height/localY)*localY;
+
+    if(globalX<width)
+        globalX+=localX;
+    if(globalY<height)
+        globalY+=localY;
+
+    cl_int status;
+    int index=0;
+
+    status=kernel.setArg(index++, input);
+    status=kernel.setArg(index++, (int)width);
+    status=kernel.setArg(index++, (int)height);
+    status=kernel.setArg(index++, output);
+    status=kernel.setArg(index++, diffusivity);
+    status=kernel.setArg(index++, (int)constrastIndex);
+    status=kernel.setArg(index++, contrastBuffer);
+//    status=kernel.setArg(index++, , nullptr);
+
+    ::cl::NDRange globalThreads(globalX, globalY);
+    ::cl::NDRange localThreads(localX, localY);
+
+    status=commandQueue.enqueueNDRangeKernel(kernel, ::cl::NullRange, globalThreads, localThreads, events, &event);
 }
 
 void linearSample(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, ::cl::Image2D &dst, size_t dstWidth, size_t dstHeight, std::vector<::cl::Event> *events, ::cl::Event &event)

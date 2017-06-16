@@ -174,10 +174,10 @@ private:
 
     ::cl::Image2D contrastGuassianScratch_;
     ::cl::Image2D contrastMagnitudeScratch_;
-    ::cl::Buffer contrastGuassian_;
-    int contrastGuassianSize_;
-    ScharrSeparableKernel contrastScharr_;
-    int contrastScharrSize_;
+    ::cl::Buffer guassian_1_0_;
+    int guassianSize_1_0_;
+    ScharrSeparableKernel scharr_1_0_;
+    int scharrSize_1_0_;
     ::cl::Buffer histogramBuffer_;
     std::vector<int> histogram_;
     ::cl::Buffer histogramScratchBuffer_;

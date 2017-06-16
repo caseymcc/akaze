@@ -338,7 +338,7 @@ __kernel void separableConvolveYImage2D(read_only image2d_t input, __constant fl
     const int yOutput=get_global_id(1);
 
     float sum=0;
-    int kSize=kernelSize;
+//    int kSize=kernelSize;
     int filterOffset=kernelSize/2;
     int yInput=yOutput-filterOffset;
 
@@ -481,11 +481,12 @@ __kernel void rowMax(read_only image2d_t input, int width, __global float *outpu
             max=value;
     }
 
-    output[0]=max;
-    //atomicMaxGlobal(output, max);
+//    atomicMaxGlobal(output, max);
+    if(index == 0)
+        output[0]=max;
 }
 
-__kernel void histogramRows(read_only image2d_t input, int width, int height, int bins, __global float *maxValue, __global int *output)//, volatile __local int *accumulator)
+__kernel void histogramRows(read_only image2d_t input, int width, int height, int bins, __global float *maxValue, __global int *output, __local int *accumulator)
 {
     const sampler_t nearestClampSampler=CLK_NORMALIZED_COORDS_FALSE|CLK_FILTER_NEAREST|CLK_ADDRESS_CLAMP_TO_EDGE;
     const int index=get_global_id(0);
@@ -495,12 +496,12 @@ __kernel void histogramRows(read_only image2d_t input, int width, int height, in
 
     const float scale=1.0f/maxValue[0];
     const int stride=bins*index;
-//    const int accumulatorStride=bins*get_local_id(0);
+    const int accumulatorStride=bins*get_local_id(0);
 
     for(int i=0; i<bins; i++)
     {
-//        accumulator[accumulatorStride+i]=0;
-        output[stride+i]=0;
+        accumulator[accumulatorStride+i]=0;
+//        output[stride+i]=0;
     }
 
     for(int i=0; i<width; i++)
@@ -513,20 +514,16 @@ __kernel void histogramRows(read_only image2d_t input, int width, int height, in
         else if(bin<0)
             bin=0;
 
-//        int count=output[stride+bin];
-//
-//        count++;
-//        output[stride+bin]=count;
-        output[stride+bin]++;
-////        int count=accumulator[accumulatorStride+bin];
-////
-////        count++;
-////        accumulator[accumulatorStride+bin]=count;
+//        output[stride+bin]++;
+        int count=accumulator[accumulatorStride+bin];
+
+        count++;
+        accumulator[accumulatorStride+bin]=count;
 //        accumulator[accumulatorStride+bin]=value;
     }
 
-//    for(int i=0; i<bins; i++)
-//        output[stride+i]=accumulator[accumulatorStride+i];
+    for(int i=0; i<bins; i++)
+        output[stride+i]=accumulator[accumulatorStride+i];
 }
 
 //__kernel void histogramCombine(__global int *input, int bins, int count, __global int *output)
@@ -554,14 +551,18 @@ __kernel void histogramCombine(__global int *input, int bins, int count, float p
 
     barrier(CLK_LOCAL_MEM_FENCE);
 
+    if(bin!=0)
+        return;
+
     int points=0;
     float perc=0.03;
-    int threshold=(int)(points*percent);
     int elements=0;
     int i;
 
     for(size_t i=0; i<bins; ++i)
         points+=histogram[i];
+
+    int threshold=(int)(points*percent);
 
     for(i=0; elements < threshold && i < bins; i++)
         elements=elements+histogram[i];
@@ -742,7 +743,7 @@ __kernel void findExtremaBuffer(__global float *input, volatile __global Extrema
 
     __global EvolutionInfo *evolution=&evolutionBuffer[mapIndex];
 
-    const float sigma=evolution->sigma;
+//    const float sigma=evolution->sigma;
     const int octave=evolution->octave;
     const int offset=evolution->offset;
     const int width=evolution->width;
@@ -818,11 +819,11 @@ __kernel void findExtremaBuffer(__global float *input, volatile __global Extrema
 
 			__global EvolutionInfo *prevEvolution=&evolutionBuffer[mapIndex-1];
 
-			const float prevSigma=prevEvolution->sigma;
+//			const float prevSigma=prevEvolution->sigma;
 			const int prevOctave=prevEvolution->octave;
 			const int prevOffset=prevEvolution->offset;
             const int prevWidth=prevEvolution->width;
-            const int prevHeight=prevEvolution->height;
+//            const int prevHeight=prevEvolution->height;
 
 			float prevScale=(float)(1<<prevOctave);
 
@@ -960,7 +961,7 @@ __kernel void consolidateKeypoints(__global ExtremaMap *extremaMapBuffer, int ma
 
 float2 calculateSubPixelBuffer(__global float *input, int offset, int width, int height, float scale, int x, int y)
 {
-    const sampler_t nearestClampSampler=CLK_NORMALIZED_COORDS_FALSE|CLK_FILTER_NEAREST|CLK_ADDRESS_CLAMP_TO_EDGE;
+//    const sampler_t nearestClampSampler=CLK_NORMALIZED_COORDS_FALSE|CLK_FILTER_NEAREST|CLK_ADDRESS_CLAMP_TO_EDGE;
 
     float2 delta;
 

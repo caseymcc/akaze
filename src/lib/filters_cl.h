@@ -42,6 +42,12 @@ float computeContrast(std::vector<int> &histogram, float hmax, float perc);
 ///
 ///
 ///
+void computeFlow(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &input, size_t width, size_t height, ::cl::Image2D &output, int diffusivity, size_t constrastIndex,
+    ::cl::Buffer &contrastBuffer, std::vector<::cl::Event> *events, ::cl::Event &event);
+
+///
+///
+///
 void linearSample(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, ::cl::Image2D &dst, size_t dstWidth, size_t dstHeight, std::vector<::cl::Event> *events, ::cl::Event &event);
 
 ///
