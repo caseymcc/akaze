@@ -27,8 +27,8 @@ AKAZE_EXPORT void separableConvolve(::cl::Context context, ::cl::CommandQueue co
     ::cl::Buffer kernelYBuffer, int kernelYSize, float scale, ::cl::Buffer &dst, size_t dstOffset, ::cl::Buffer &scratch, std::vector<::cl::Event> *events, ::cl::Event &event);
 
 //Performs convolve in 2 seperate kernels using local memory for image storage
-AKAZE_EXPORT void separableConvolve_local(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Buffer kernelXBuffer, int kernelXSize,
-    ::cl::Buffer kernelYBuffer, int kernelYSize, float scale, ::cl::Image2D &dst, ::cl::Image2D &scratch, std::vector<::cl::Event> *events, ::cl::Event &event);
+//AKAZE_EXPORT void separableConvolve_local(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Buffer kernelXBuffer, int kernelXSize,
+//    ::cl::Buffer kernelYBuffer, int kernelYSize, float scale, ::cl::Image2D &dst, ::cl::Image2D &scratch, std::vector<::cl::Event> *events, ::cl::Event &event);
 
 //Performs convolve in single kernel using local memory for image storage
 AKAZE_EXPORT void separableConvolve_localXY(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Buffer kernelXBuffer, ::cl::Buffer kernelYBuffer,

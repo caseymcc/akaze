@@ -133,7 +133,8 @@ void copyToLocal(read_only image2d_t input, int width, int height, int border, i
 
         for(int i=0; i<perItemCache; ++i)
         {
-            imageCache[cacheIndex+i]=read_imagef(input, nearestClampSampler, (int2)(indexX, indexY)).x;
+            float value=read_imagef(input, nearestClampSampler, (int2)(indexX, indexY)).x;
+            imageCache[cacheIndex+i]=value;
             indexX++;
         }
     }

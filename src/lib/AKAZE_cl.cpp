@@ -28,7 +28,7 @@ AKAZE::AKAZE(::cl::Context openclContext, ::cl::CommandQueue commandQueue, const
     openclContext_(openclContext),
     commandQueue_(commandQueue)
 {
-    saveImages_=false;
+    saveImages_=true;
     saveCsv_=false;
     reordering_=true;
     width_=0;
@@ -190,8 +190,8 @@ void AKAZE::Allocate_Memory_Evolution()
 //    events[8].wait();
     zeroFloatBuffer(openclContext_, commandQueue_, maxBuffer_, 1, nullptr, events[7]);
     zeroFloatBuffer(openclContext_, commandQueue_, contrastBuffer_, 1, nullptr, events[8]);
-    zeroIntBuffer(openclContext_, commandQueue_, histogramBuffer_, options_.kcontrast_nbins*sizeof(cl_int), nullptr, events[9]);
-    zeroIntBuffer(openclContext_, commandQueue_, histogramScratchBuffer_, evolution_[0].height*options_.kcontrast_nbins*sizeof(cl_int), nullptr, events[10]);
+    zeroFloatBuffer(openclContext_, commandQueue_, histogramBuffer_, histogram_.size(), nullptr, events[9]);
+    zeroIntBuffer(openclContext_, commandQueue_, histogramScratchBuffer_, evolution_[0].height*options_.kcontrast_nbins, nullptr, events[10]);
 
     zeroImage(openclContext_, commandQueue_, contrastGuassianScratch_, nullptr, events[11]);
     zeroImage(openclContext_, commandQueue_, contrastMagnitudeScratch_, nullptr, events[12]);
@@ -231,9 +231,15 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
 
     commandQueue_.enqueueWriteImage(evolution_[0].image, CL_FALSE, origin, region, 0, 0, (void *)image.data(), nullptr, &writeImageEvents[0]);
 
+    writeImageEvents[0].wait();
 //    imageEvent.wait();
     gaussianSeparable(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].smooth, image.cols(), image.rows(), options_.soffset, &writeImageEvents, guassianEvents[0]);
 //    gaussianSeparable(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].smooth, image.cols(), image.rows(), offsetGuassian_, offsetGuassianSize_, evolution_[0].scratch, &events, guassEvent);
+
+    guassianEvents[0].wait();
+    saveImage2D(commandQueue_, evolution_[0].image, "../output/evolution_cl.jpg");
+    saveImage2D(commandQueue_, evolution_[0].smooth, "../output/gauss_evolution_cl.jpg");
+    return -1;
 
     commandQueue_.enqueueCopyImage(evolution_[0].smooth, evolution_[0].image, origin, origin, region, &guassianEvents, &copyEvent);
 
@@ -312,6 +318,12 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
 //            kcontrast=computeContrast(histogram_, histogramMax, options_.kcontrast_percentile);
 //            contrastLoaded=true;
 //        }
+        
+//        float contrast;
+//        ::cl::Event readContrastEvent;
+//        commandQueue_.enqueueReadBuffer(contrastBuffer_, false, 0, sizeof(float), &contrast, &contrastWaitEvents, &readContrastEvent);
+//        readContrastEvent.wait();
+
 
         switch(options_.diffusivity)
         {

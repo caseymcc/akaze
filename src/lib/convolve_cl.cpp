@@ -110,60 +110,61 @@ void separableConvolve(::cl::Context context, ::cl::CommandQueue commandQueue, :
 //    commandQueue.flush();
 }
 
-void separableConvolve_local(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Buffer kernelXBuffer, int kernelXSize,
-    ::cl::Buffer kernelYBuffer, int kernelYSize, float scale, ::cl::Image2D &dst, ::cl::Image2D &scratch, std::vector<::cl::Event> *events, ::cl::Event &event)
-{
-    size_t filterSize;
-
-    ::cl::Kernel kernelX=getKernel(context, "separableConvolveXImage2D_local", "lib/kernels/convolve.cl");
-    ::cl::Kernel kernelY=getKernel(context, "separableConvolveYImage2D_local", "lib/kernels/convolve.cl");
-    cl_int status;
-    int index=0;
-    ::cl::Event kernelYEvent;
-
-    size_t localX=16;
-    size_t localY=16;
-    size_t globalX=(width/localX)*localX;
-    size_t globalY=(height/localY)*localY;
-
-    if(globalX<width)
-        globalX+=localX;
-    if(globalY<height)
-        globalY+=localY;
-
-    int cacheX=(kernelXSize/2)*2+localX;
-    int cacheY=(kernelYSize/2)*2+localY;
-
-    status=kernelY.setArg(index++, src);
-    status=kernelY.setArg(index++, (int)width);
-    status=kernelY.setArg(index++, (int)height);
-    status=kernelY.setArg(index++, kernelYBuffer);
-    status=kernelY.setArg(index++, kernelYSize);
-    status=kernelY.setArg(index++, (float)1.0); //only scale once, so no scale here
-    status=kernelY.setArg(index++, scratch);
-    status=kernelY.setArg(index++, cacheX*cacheY*sizeof(float), nullptr); //setup local image cache
-
-    ::cl::NDRange globalThreads(globalX, globalY);
-    ::cl::NDRange localThreads(localX, localY);
-
-    status=commandQueue.enqueueNDRangeKernel(kernelY, ::cl::NullRange, globalThreads, localThreads, events, &kernelYEvent);
-
-    std::vector<::cl::Event> kernelYEvents={kernelYEvent};
-    index=0;
-
-    status=kernelX.setArg(index++, scratch);
-    status=kernelX.setArg(index++, (int)width);
-    status=kernelX.setArg(index++, (int)height);
-    status=kernelX.setArg(index++, kernelXBuffer);
-    status=kernelX.setArg(index++, kernelXSize);
-    status=kernelX.setArg(index++, scale);
-    status=kernelX.setArg(index++, dst);
-    status=kernelX.setArg(index++, cacheX*cacheY*sizeof(float), nullptr); //setup local image cache
-
-    status=commandQueue.enqueueNDRangeKernel(kernelX, ::cl::NullRange, globalThreads, localThreads, &kernelYEvents, &event);
-
-    //    commandQueue.flush();
-}
+//something wrong with this one, slient driver crash I think as everyhing after is fubared
+//void separableConvolve_local(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Buffer kernelXBuffer, int kernelXSize,
+//    ::cl::Buffer kernelYBuffer, int kernelYSize, float scale, ::cl::Image2D &dst, ::cl::Image2D &scratch, std::vector<::cl::Event> *events, ::cl::Event &event)
+//{
+//    size_t filterSize;
+//
+//    ::cl::Kernel kernelX=getKernel(context, "separableConvolveXImage2D_local", "lib/kernels/convolve.cl");
+//    ::cl::Kernel kernelY=getKernel(context, "separableConvolveYImage2D_local", "lib/kernels/convolve.cl");
+//    cl_int status;
+//    int index=0;
+//    ::cl::Event kernelYEvent;
+//
+//    size_t localX=16;
+//    size_t localY=16;
+//    size_t globalX=(width/localX)*localX;
+//    size_t globalY=(height/localY)*localY;
+//
+//    if(globalX<width)
+//        globalX+=localX;
+//    if(globalY<height)
+//        globalY+=localY;
+//
+//    int cacheX=(kernelXSize/2)*2+localX;
+//    int cacheY=(kernelYSize/2)*2+localY;
+//
+//    status=kernelY.setArg(index++, src);
+//    status=kernelY.setArg(index++, (int)width);
+//    status=kernelY.setArg(index++, (int)height);
+//    status=kernelY.setArg(index++, kernelYBuffer);
+//    status=kernelY.setArg(index++, kernelYSize);
+//    status=kernelY.setArg(index++, (float)1.0); //only scale once, so no scale here
+//    status=kernelY.setArg(index++, scratch);
+//    status=kernelY.setArg(index++, cacheX*cacheY*sizeof(float), nullptr); //setup local image cache
+//
+//    ::cl::NDRange globalThreads(globalX, globalY);
+//    ::cl::NDRange localThreads(localX, localY);
+//
+//    status=commandQueue.enqueueNDRangeKernel(kernelY, ::cl::NullRange, globalThreads, localThreads, events, &kernelYEvent);
+//
+//    std::vector<::cl::Event> kernelYEvents={kernelYEvent};
+//    index=0;
+//
+//    status=kernelX.setArg(index++, scratch);
+//    status=kernelX.setArg(index++, (int)width);
+//    status=kernelX.setArg(index++, (int)height);
+//    status=kernelX.setArg(index++, kernelXBuffer);
+//    status=kernelX.setArg(index++, kernelXSize);
+//    status=kernelX.setArg(index++, scale);
+//    status=kernelX.setArg(index++, dst);
+//    status=kernelX.setArg(index++, cacheX*cacheY*sizeof(float), nullptr); //setup local image cache
+//
+//    status=commandQueue.enqueueNDRangeKernel(kernelX, ::cl::NullRange, globalThreads, localThreads, &kernelYEvents, &event);
+//
+//    //    commandQueue.flush();
+//}
 
 void separableConvolve(::cl::Context context, ::cl::CommandQueue commandQueue, ::cl::Image2D &src, size_t width, size_t height, ::cl::Buffer kernelXBuffer, int kernelXSize, 
     ::cl::Buffer kernelYBuffer, int kernelYSize, float scale, ::cl::Buffer &dst, size_t offset, ::cl::Image2D &scratch, std::vector<::cl::Event> *events, ::cl::Event &event)
@@ -374,13 +375,10 @@ void gaussianSeparable(::cl::Context context, ::cl::CommandQueue commandQueue, :
 
     ::cl::Buffer kernelBuffer=buildGaussianSeparableKernel(context, sigma, kernelSize);
 
-//    size_t width, height;
-    cl_image_format format;
-
-//    src.getImageInfo(CL_IMAGE_WIDTH, &width);
-//    src.getImageInfo(CL_IMAGE_HEIGHT, &height);
-    src.getImageInfo(CL_IMAGE_FORMAT, &format);
-
+//    cl_image_format format;
+//
+//    src.getImageInfo(CL_IMAGE_FORMAT, &format);
+//
 //    ::cl::Image2D scratch(context, CL_MEM_READ_WRITE, ::cl::ImageFormat(format.image_channel_order, format.image_channel_data_type), width, height);
 //
 //    separableConvolve(context, commandQueue, src, width, height, kernelBuffer, kernelSize, kernelBuffer, kernelSize, 1.0, dst, scratch, events, event);

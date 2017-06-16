@@ -146,16 +146,19 @@ void benchmarkOpenCL(RowMatrixXf image, Options &options)
     ::cl::Context openClContext;
     libAKAZE::cl::OpenClDevice deviceInfo;
 
-    if(FLAGS_opencl_device=="any")
+    std::string device=FLAGS_opencl_device;
+    std::string platform=FLAGS_opencl_platform;
+
+    if(device=="any")
     {
         openClContext=libAKAZE::cl::openDevice(deviceInfo);
     }
     else
     {
-        if(FLAGS_opencl_platform == "any")
-            openClContext=libAKAZE::cl::openDevice(FLAGS_opencl_device, deviceInfo);
+        if(platform== "any")
+            openClContext=libAKAZE::cl::openDevice(device, deviceInfo);
         else
-            openClContext=libAKAZE::cl::openDevice(FLAGS_opencl_platform, FLAGS_opencl_device, deviceInfo);
+            openClContext=libAKAZE::cl::openDevice(platform, device, deviceInfo);
     }
 
     if(openClContext() == nullptr)
