@@ -7,6 +7,11 @@
 
 #include "timer/timer.hpp"
 
+#include "cimg/CImg.h"
+#include "lib/utils.h"
+
+extern Options getOptions();
+
 void benchmarkOpenCL_Gauss(::cl::Context &context, ::cl::CommandQueue &queue, Options &options, ::cl::Image2D &image, size_t width, size_t height, ::cl::Image2D &output, ::cl::Image2D &scratch, float sigma)
 {
     int kernelSize;
@@ -72,7 +77,7 @@ void benchmarkOpenCL_Gauss_LocalXY(::cl::Context &context, ::cl::CommandQueue &q
     events[0].wait();
 
     time=timer.elapsedMs();
-    std::cout<<"      separableConvolve "<<kernelSize<<"x"<<kernelSize<<" w/ scratch: "<<(time/options.iterations)<<"ms (Total: "<<time<<")"<<std::endl;
+    std::cout<<"      separableConvolve_localXY "<<kernelSize<<"x"<<kernelSize<<" "<<(time/options.iterations)<<"ms (Total: "<<time<<")"<<std::endl;
 
     if(options.saveImages)
     {
@@ -85,7 +90,7 @@ void benchmarkOpenCL_Gauss_LocalXY(::cl::Context &context, ::cl::CommandQueue &q
 
 void benchmarkOpenCL_Scharr(::cl::Context &context, ::cl::CommandQueue &queue, Options &options, ::cl::Image2D &image, size_t width, size_t height, ::cl::Image2D &output, ::cl::Image2D &scratch, int size)
 {
-    int kernelSize;
+    int kernelSize; 
     libAKAZE::cl::ScharrSeparableKernel scharrKernel=libAKAZE::cl::buildScharrSeparableKernel(context, size, kernelSize, false);
     ::cl::Event event;
     std::vector<::cl::Event> events(1);
@@ -121,43 +126,43 @@ void benchmarkOpenCL_Scharr(::cl::Context &context, ::cl::CommandQueue &queue, O
     }
 }
 
-void benchmarkOpenCL_Scharr_Local(::cl::Context &context, ::cl::CommandQueue &queue, Options &options, ::cl::Image2D &image, size_t width, size_t height, ::cl::Image2D &output, ::cl::Image2D &scratch, int size)
-{
-    int kernelSize;
-    libAKAZE::cl::ScharrSeparableKernel scharrKernel=libAKAZE::cl::buildScharrSeparableKernel(context, size, kernelSize, false);
-    ::cl::Event event;
-    std::vector<::cl::Event> events(1);
-    double time;
-
-    if(options.saveImages)
-    {//clear out output image
-        libAKAZE::cl::zeroImage(context, queue, output, nullptr, event);
-        event.wait();
-    }
-
-    timer::Timer timer;
-
-    libAKAZE::cl::separableConvolve_local(context, queue, image, width, height, scharrKernel.edge, kernelSize, scharrKernel.smooth, kernelSize,
-        1.0f, output, scratch, nullptr, events[0]);
-    for(size_t i=1; i<options.iterations; ++i)
-    {
-        libAKAZE::cl::separableConvolve_local(context, queue, image, width, height, scharrKernel.edge, kernelSize, scharrKernel.smooth, kernelSize,
-            1.0f, output, scratch, &events, event);
-        events[0]=event;
-    }
-    events[0].wait();
-
-    time=timer.elapsedMs();
-    std::cout<<"      separableConvolve_local "<<kernelSize<<"x"<<kernelSize<<" w/ scratch: "<<(time/options.iterations)<<"ms (Total: "<<time<<")"<<std::endl;
-
-    if(options.saveImages)
-    {
-        std::ostringstream filename;
-
-        filename<<"scharrFilter_local_"<<kernelSize<<"x"<<kernelSize<<".jpg";
-        libAKAZE::cl::saveImage2D(queue, output, filename.str());
-    }
-}
+//void benchmarkOpenCL_Scharr_Local(::cl::Context &context, ::cl::CommandQueue &queue, Options &options, ::cl::Image2D &image, size_t width, size_t height, ::cl::Image2D &output, ::cl::Image2D &scratch, int size)
+//{
+//    int kernelSize;
+//    libAKAZE::cl::ScharrSeparableKernel scharrKernel=libAKAZE::cl::buildScharrSeparableKernel(context, size, kernelSize, false);
+//    ::cl::Event event;
+//    std::vector<::cl::Event> events(1);
+//    double time;
+//
+//    if(options.saveImages)
+//    {//clear out output image
+//        libAKAZE::cl::zeroImage(context, queue, output, nullptr, event);
+//        event.wait();
+//    }
+//
+//    timer::Timer timer;
+//
+//    libAKAZE::cl::separableConvolve_local(context, queue, image, width, height, scharrKernel.edge, kernelSize, scharrKernel.smooth, kernelSize,
+//        1.0f, output, scratch, nullptr, events[0]);
+//    for(size_t i=1; i<options.iterations; ++i)
+//    {
+//        libAKAZE::cl::separableConvolve_local(context, queue, image, width, height, scharrKernel.edge, kernelSize, scharrKernel.smooth, kernelSize,
+//            1.0f, output, scratch, &events, event);
+//        events[0]=event;
+//    }
+//    events[0].wait();
+//
+//    time=timer.elapsedMs();
+//    std::cout<<"      separableConvolve_local "<<kernelSize<<"x"<<kernelSize<<" w/ scratch: "<<(time/options.iterations)<<"ms (Total: "<<time<<")"<<std::endl;
+//
+//    if(options.saveImages)
+//    {
+//        std::ostringstream filename;
+//
+//        filename<<"scharrFilter_local_"<<kernelSize<<"x"<<kernelSize<<".jpg";
+//        libAKAZE::cl::saveImage2D(queue, output, filename.str());
+//    }
+//}
 
 void benchmarkOpenCL_Scharr_LocalXY(::cl::Context &context, ::cl::CommandQueue &queue, Options &options, ::cl::Image2D &image, size_t width, size_t height, ::cl::Image2D &output, int size)
 {
@@ -229,10 +234,10 @@ void benchmarkOpenCLConvole(::cl::Context &context, ::cl::CommandQueue &queue, O
     benchmarkOpenCL_Scharr(context, queue, options, image, width, height, output, scratch, 3);
     benchmarkOpenCL_Scharr(context, queue, options, image, width, height, output, scratch, 4);
 
-    benchmarkOpenCL_Scharr_Local(context, queue, options, image, width, height, output, scratch, 1);
-    benchmarkOpenCL_Scharr_Local(context, queue, options, image, width, height, output, scratch, 2);
-    benchmarkOpenCL_Scharr_Local(context, queue, options, image, width, height, output, scratch, 3);
-    benchmarkOpenCL_Scharr_Local(context, queue, options, image, width, height, output, scratch, 4);
+//    benchmarkOpenCL_Scharr_Local(context, queue, options, image, width, height, output, scratch, 1);
+//    benchmarkOpenCL_Scharr_Local(context, queue, options, image, width, height, output, scratch, 2);
+//    benchmarkOpenCL_Scharr_Local(context, queue, options, image, width, height, output, scratch, 3);
+//    benchmarkOpenCL_Scharr_Local(context, queue, options, image, width, height, output, scratch, 4);
 
     benchmarkOpenCL_Scharr_LocalXY(context, queue, options, image, width, height, output, 1);
     benchmarkOpenCL_Scharr_LocalXY(context, queue, options, image, width, height, output, 2);
@@ -258,20 +263,32 @@ void benchmarkOpenCLAKAZE(::cl::Context &context, ::cl::CommandQueue &queue, Opt
     timer.reset();
 
     evolution.Create_Nonlinear_Scale_Space(image);
-//    evolution.Feature_Detection();
-//    evolution.Compute_Descriptors();
+    evolution.Feature_Detection();
+    evolution.Compute_Descriptors();
 
     totalTime=timer.elapsedMs();
 
     std::vector<libAKAZE::Keypoint> kpts;
     libAKAZE::Descriptors desc;
 
-//    evolution.getKeypoints(kpts);
-//    evolution.getDescriptors(desc);
+    evolution.getKeypoints(kpts);
+    evolution.getDescriptors(desc);
 
     std::cout<<"Number of points: "<<kpts.size()<<std::endl;
     evolution.Show_Computation_Times();
     std::cout<<"Total Time: "<<totalTime<<std::endl;
+
+    if(options.saveImages)
+    {
+        std::cout<<"Saving Images: "<<totalTime<<std::endl;
+
+        cimg_library::CImg<float> rgb_image;// =img.get_resize(img.width(), img.height(), img.depth(), 3);
+        
+        ConvertEigenToCImg(image, rgb_image);
+
+        draw_keypoints_vector(rgb_image, kpts);
+        rgb_image.save("../output/benchmark_detected_features.jpg");
+    }
 }
 
 void benchmarkOpenCLDevice(::cl::Context &openClContext, RowMatrixXf &image, Options &options)

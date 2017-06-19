@@ -157,7 +157,7 @@ OpenCLContext *getOpenClContext(::cl::Context context)
     return program;
 }
 
-::cl::Kernel getKernel(::cl::Context context, std::string kernelName, std::string fileName)
+::cl::Kernel &getKernel(::cl::Context context, std::string kernelName, std::string fileName)
 {
     SharedKernelInfo kernelInfo=getKernelInfo(context, kernelName, fileName);
 

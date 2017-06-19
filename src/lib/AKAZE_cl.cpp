@@ -14,6 +14,8 @@
 
 #include "openClContext.h"
 
+#define COPY_EVOLUTION_IMAGE 0
+
 using namespace std;
 
 namespace libAKAZE
@@ -28,7 +30,7 @@ AKAZE::AKAZE(::cl::Context openclContext, ::cl::CommandQueue commandQueue, const
     openclContext_(openclContext),
     commandQueue_(commandQueue)
 {
-    saveImages_=true;
+    saveImages_=false;
     saveCsv_=false;
     reordering_=true;
     width_=0;
@@ -194,8 +196,8 @@ void AKAZE::Allocate_Memory_Evolution()
 //    events[8].wait();
     zeroFloatBuffer(openclContext_, commandQueue_, maxBuffer_, 1, nullptr, events[index++]);
     zeroFloatBuffer(openclContext_, commandQueue_, contrastBuffer_, 1, nullptr, events[index++]);
-    zeroIntBuffer(openclContext_, commandQueue_, histogramBuffer_, options_.kcontrast_nbins*sizeof(cl_int), nullptr, events[index++]);
-    zeroIntBuffer(openclContext_, commandQueue_, histogramScratchBuffer_, evolution_[0].height*options_.kcontrast_nbins*sizeof(cl_int), nullptr, events[index++]);
+    zeroFloatBuffer(openclContext_, commandQueue_, histogramBuffer_, histogram_.size(), nullptr, events[index++]);
+    zeroIntBuffer(openclContext_, commandQueue_, histogramScratchBuffer_, evolution_[0].height*options_.kcontrast_nbins, nullptr, events[index++]);
 
     zeroImage(openclContext_, commandQueue_, contrastGuassianScratch_, nullptr, events[index++]);
     zeroImage(openclContext_, commandQueue_, contrastMagnitudeScratch_, nullptr, events[index++]);
@@ -211,8 +213,6 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
         cerr<<"Firstly you need to call AKAZE::Allocate_Memory_Evolution()"<<endl;
         return -1;
     }
-
-//    if(image.col != width_)
 
     //copy image to the first level of the evolution
     ::cl::size_t<3> origin;
@@ -235,14 +235,7 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
 
     commandQueue_.enqueueWriteImage(evolution_[0].image, CL_FALSE, origin, region, 0, 0, (void *)image.data(), nullptr, &writeImageEvents[0]);
 
-//    imageEvent.wait();
     gaussianSeparable(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].smooth, image.cols(), image.rows(), options_.soffset, &writeImageEvents, guassianEvents[0]);
-//    gaussianSeparable(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].smooth, image.cols(), image.rows(), offsetGuassian_, offsetGuassianSize_, evolution_[0].scratch, &events, guassEvent);
-
-//    commandQueue_.enqueueCopyImage(evolution_[0].smooth, evolution_[0].image, origin, origin, region, &guassianEvents, &copyEvent);
-
-//    float kcontrast=computeKPercentile(openclContext_, commandQueue_, evolution_[0].image, options_.kcontrast_percentile, 1.0, options_.kcontrast_nbins, 0, 0);
-    float kcontrast;
 
     computeKPercentile(openclContext_, commandQueue_, evolution_[0].image, evolution_[0].width, evolution_[0].height, options_.kcontrast_nbins, options_.kcontrast_percentile,
         contrastGuassianScratch_, contrastMagnitudeScratch_, histogramBuffer_, histogramScratchBuffer_, guassian_1_0_, guassianSize_1_0_, evolution_[0].scratch,
@@ -250,14 +243,9 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
     
     commandQueue_.flush();
 
-    float histogramMax;
-//    std::vector<::cl::Event> readHistogramEvents(2);
-//
-//    commandQueue_.enqueueReadBuffer(maxBuffer_, false, 0, sizeof(float), &histogramMax, &contrastWaitEvents, &readHistogramEvents[0]);
-//    commandQueue_.enqueueReadBuffer(histogramBuffer_, false, 0, sizeof(cl_int)*histogram_.size(), histogram_.data(), &contrastWaitEvents, &readHistogramEvents[1]);
-
     bool contrastLoaded=false;
     timing_.kcontrast=timer.elapsedMs();
+    bool octaveChange;
 
 //    copyEvent.wait();
     std::vector<::cl::Event> evolutionEvent(1);
@@ -265,45 +253,23 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
     for(size_t i=1; i<evolution_.size(); i++)
     {
         std::vector<::cl::Event> copyImageWaitEvent(1);
+        octaveChange=(evolution_[i].octave>evolution_[i-1].octave);
 
-        if(evolution_[i].octave > evolution_[i-1].octave)
-        {
-            ::cl::Event copyImageEvent;
-
-            if(i==1)
-                linearSample(openclContext_, commandQueue_, evolution_[i-1].smooth, evolution_[i].image, evolution_[i].width, evolution_[i].height, &guassianEvents, copyImageWaitEvent[0]);
-            else
-                linearSample(openclContext_, commandQueue_, evolution_[i-1].image, evolution_[i].image, evolution_[i].width, evolution_[i].height, &evolutionEvent, copyImageWaitEvent[0]);
-//            kcontrast=kcontrast*0.75;
-        }
-        else
-        {
-            ::cl::Event copyImageEvent;
-
-//            evolution_[i].image=evolution_[i-1].image;
-            region[0]=evolution_[i].width;
-            region[1]=evolution_[i].height;
-            region[2]=1;
-
-            if(i==1)
-            {
-//                std::vector<::cl::Event> firstCopy={copyEvent};
-
-//                commandQueue_.enqueueCopyImage(evolution_[i-1].image, evolution_[i].image, origin, origin, region, &firstCopy, &copyImageEvent);
-                commandQueue_.enqueueCopyImage(evolution_[i-1].smooth, evolution_[i].image, origin, origin, region, &guassianEvents, &copyImageWaitEvent[0]);
-            }
-            else
-                commandQueue_.enqueueCopyImage(evolution_[i-1].image, evolution_[i].image, origin, origin, region, &evolutionEvent, &copyImageWaitEvent[0]);
-        }
+        if(octaveChange)
+            linearSample(openclContext_, commandQueue_, evolution_[i-1].image, evolution_[i].image, evolution_[i].width, evolution_[i].height, &evolutionEvent, copyImageWaitEvent[0]);
 
         std::vector<::cl::Event>gaussWaitEvent(1);
 
-//        if(!copyImageWaitEvent.empty())
-//            gaussianSeparable(openclContext_, commandQueue_, evolution_[i].image, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, 1.0, &copyImageWaitEvent, gaussEvent);
+        if(octaveChange)
             gaussianSeparable(openclContext_, commandQueue_, evolution_[i].image, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, guassian_1_0_, guassianSize_1_0_, &copyImageWaitEvent, gaussWaitEvent[0]);
+        else
+        {
+            if(i==1)
+                gaussianSeparable(openclContext_, commandQueue_, evolution_[i-1].smooth, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, guassian_1_0_, guassianSize_1_0_, &guassianEvents, gaussWaitEvent[0]);
+            else
+                gaussianSeparable(openclContext_, commandQueue_, evolution_[i-1].image, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, guassian_1_0_, guassianSize_1_0_, &evolutionEvent, gaussWaitEvent[0]);
+        }
 
-//        else
-//            gaussianSeparable(openclContext_, commandQueue_, evolution_[i].image, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, 1.0, nullptr, gaussEvent);
         ::cl::Event diffusivityEvent;
 #if(0)
         ::cl::Event derivativeXEvent;
@@ -326,6 +292,12 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
 //            kcontrast=computeContrast(histogram_, histogramMax, options_.kcontrast_percentile);
 //            contrastLoaded=true;
 //        }
+        
+//        float contrast;
+//        ::cl::Event readContrastEvent;
+//        commandQueue_.enqueueReadBuffer(contrastBuffer_, false, 0, sizeof(float), &contrast, &contrastWaitEvents, &readContrastEvent);
+//        readContrastEvent.wait();
+
 
         switch(options_.diffusivity)
         {
@@ -348,7 +320,30 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
 
         std::vector<::cl::Event>stepWait={diffusivityEvent};
 
-        for(int j=0; j<nsteps_[i-1]; j++)
+        {
+            ::cl::Image2D image;
+
+            if(octaveChange)
+                image=evolution_[i].image;
+            else
+            {
+                if(i==1)
+                    image=evolution_[i-1].smooth;
+                else
+                    image=evolution_[i-1].image;
+            }
+
+            ::cl::Event stepEvent;
+
+            nldStepScalar(openclContext_, commandQueue_, image, evolution_[i].flow, evolution_[i].step, evolution_[i].width, evolution_[i].height, tsteps_[i-1][0], &stepWait, stepEvent);
+
+            //swap image references for next loop
+            ::cl::Image2D tempImage=evolution_[i].image;
+            evolution_[i].image=evolution_[i].step;
+            evolution_[i].step=tempImage;
+            stepWait[0]=stepEvent;
+        }
+        for(int j=1; j<nsteps_[i-1]; j++)
         {
             ::cl::Event stepEvent;
 
@@ -359,16 +354,12 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
             evolution_[i].image=evolution_[i].step;
             evolution_[i].step=tempImage;
 
-//            stepEvent.wait();
+            //            stepEvent.wait();
             stepWait[0]=stepEvent;
         }
         //make next loop wait on prev complete
         evolutionEvent[0]=stepWait[0];
-
-        commandQueue_.flush();
-//        stepWait[0].wait();
     }
-
 
     //copy final images over to buffer likely better to alter evolution building to use the buffer instead, but as a shortcut this will work for now)
     std::vector<::cl::Event> imageEvents(evolution_.size());
@@ -380,7 +371,7 @@ int AKAZE::Create_Nonlinear_Scale_Space(const RowMatrixXf &image)
 
         commandQueue_.enqueueCopyImageToBuffer(evolution_[i].image, evolutionImage_, origin, region, evolution_[i].offset*sizeof(cl_float), &evolutionEvent, &imageEvents[i]);
     }
-    ::cl::WaitForEvents(imageEvents);
+//    ::cl::WaitForEvents(imageEvents);
 
     timing_.evolution=timer.elapsedMs();
     timing_.scale=timing_.evolution+timing_.kcontrast;
@@ -505,71 +496,31 @@ void AKAZE::Compute_Multiscale_Derivatives(std::vector<std::vector<::cl::Event>>
         float ratio=pow(2.f, (float)evolution_[i].octave);
         int sigma_size_=fRound(evolution_[i].sigma * options_.derivative_factor/ratio);
 
-        ::cl::Event lxEvent;
-        ::cl::Event lyEvent;
-        
-        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, false, true, evolution_[i].dx, evolution_[i].offset, nullptr, lxEvent);
-        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dy, evolution_[i].offset, nullptr, lyEvent);
+//        ::cl::Event lxEvent;
+//        ::cl::Event lyEvent;
+//        
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, false, true, evolution_[i].dx, evolution_[i].offset, nullptr, lxEvent);
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dy, evolution_[i].offset, nullptr, lyEvent);
+//
+//        std::vector<::cl::Event> lxCompleteEvent={lxEvent};
+//        std::vector<::cl::Event> lyCompleteEvent={lyEvent};
+//        std::vector<::cl::Event> events(3);
+//
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, false, true, evolution_[i].dxx, evolution_[i].offset, &lxCompleteEvent, events[0]);
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dxy, evolution_[i].offset, &lxCompleteEvent, events[1]);
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dyy, evolution_[i].offset, &lyCompleteEvent, events[2]);
+//
+//        evolutionEvents.push_back(events);
+//        commandQueue_.flush();
 
-        std::vector<::cl::Event> lxCompleteEvent={lxEvent};
-        std::vector<::cl::Event> lyCompleteEvent={lyEvent};
-        std::vector<::cl::Event> events(3);
+        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, false, true, evolution_[i].dx, evolution_[i].offset, nullptr, nullptr);
+        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dy, evolution_[i].offset, nullptr, nullptr);
 
-        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, false, true, evolution_[i].dxx, evolution_[i].offset, &lxCompleteEvent, events[0]);
-        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dxy, evolution_[i].offset, &lxCompleteEvent, events[1]);
-        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dyy, evolution_[i].offset, &lyCompleteEvent, events[2]);
+        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, false, true, evolution_[i].dxx, evolution_[i].offset, nullptr, nullptr);
+        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dxy, evolution_[i].offset, nullptr, nullptr);
+        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dyy, evolution_[i].offset, nullptr, nullptr);
 
-        evolutionEvents.push_back(events);
-    }
-
-    if(saveImages_)
-    {
-        std::string outputFile;
-
-        for(int i=0; i<(int)(evolution_.size()); i++)
-        {
-            ::cl::WaitForEvents(evolutionEvents[i]);
-
-            outputFile="../output/evolutionLx_"+to_formatted_string(i, 2)+"_cl.jpg";
-            saveBufferAsImage(commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
-
-            outputFile="../output/evolutionLy_"+to_formatted_string(i, 2)+"_cl.jpg";
-            saveBufferAsImage(commandQueue_, evolution_[i].dy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
-
-            outputFile="../output/evolutionLxx_"+to_formatted_string(i, 2)+"_cl.jpg";
-            saveBufferAsImage(commandQueue_, evolution_[i].dxx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
-
-            outputFile="../output/evolutionLxy_"+to_formatted_string(i, 2)+"_cl.jpg";
-            saveBufferAsImage(commandQueue_, evolution_[i].dxy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
-
-            outputFile="../output/evolutionLyy_"+to_formatted_string(i, 2)+"_cl.jpg";
-            saveBufferAsImage(commandQueue_, evolution_[i].dyy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
-        }
-    }
-
-    if(saveCsv_)
-    {
-        std::string outputFile;
-
-        for(int i=0; i<(int)(evolution_.size()); i++)
-        {
-            ::cl::WaitForEvents(evolutionEvents[i]);
-
-            outputFile="../output/evolutionLx_"+to_formatted_string(i, 2)+"_cl.csv";
-            saveBufferCsv(commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
-
-            outputFile="../output/evolutionLy_"+to_formatted_string(i, 2)+"_cl.csv";
-            saveBufferCsv(commandQueue_, evolution_[i].dy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
-
-            outputFile="../output/evolutionLxx_"+to_formatted_string(i, 2)+"_cl.csv";
-            saveBufferCsv(commandQueue_, evolution_[i].dxx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
-
-            outputFile="../output/evolutionLxy_"+to_formatted_string(i, 2)+"_cl.csv";
-            saveBufferCsv(commandQueue_, evolution_[i].dxy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
-
-            outputFile="../output/evolutionLyy_"+to_formatted_string(i, 2)+"_cl.csv";
-            saveBufferCsv(commandQueue_, evolution_[i].dyy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
-        }
+        commandQueue_.flush();
     }
 //    timing_.derivatives=timer.elapsedMs();
 }
@@ -632,8 +583,9 @@ void AKAZE::Save_Derivatives(std::string &directory)
 
 void AKAZE::Compute_Determinant_Hessian_Response()
 {
-    std::vector<std::vector<::cl::Event>> completeEvents;
     timer::Timer timer;
+    
+    std::vector<std::vector<::cl::Event>> completeEvents;
 
     Compute_Multiscale_Derivatives(completeEvents);
 
@@ -643,11 +595,14 @@ void AKAZE::Compute_Determinant_Hessian_Response()
     {
         ::cl::Event event;
 
-        determinantHessian(openclContext_, commandQueue_, evolution_[i].dxx, evolution_[i].offset, evolution_[i].dyy, evolution_[i].offset, evolution_[i].dxy, evolution_[i].offset, 
-            evolution_[i].width, evolution_[i].height, evolution_[i].det, evolution_[i].offset, &completeEvents[i], events[i]);
+//        determinantHessian(openclContext_, commandQueue_, evolution_[i].dxx, evolution_[i].offset, evolution_[i].dyy, evolution_[i].offset, evolution_[i].dxy, evolution_[i].offset, 
+//            evolution_[i].width, evolution_[i].height, evolution_[i].det, evolution_[i].offset, &completeEvents[i], events[i]);
+        determinantHessian(openclContext_, commandQueue_, evolution_[i].dxx, evolution_[i].offset, evolution_[i].dyy, evolution_[i].offset, evolution_[i].dxy, evolution_[i].offset,
+            evolution_[i].width, evolution_[i].height, evolution_[i].det, evolution_[i].offset, nullptr, events[i]);
+
     }
 
-    ::cl::WaitForEvents(events);
+//    ::cl::WaitForEvents(events);
     timing_.derivatives=timer.elapsedMs();
 
     if(saveImages_)
@@ -657,6 +612,21 @@ void AKAZE::Compute_Determinant_Hessian_Response()
 
         for(size_t i=0; i<evolution_.size(); ++i)
         {
+            outputFile="../output/evolutionLx_"+to_formatted_string(i, 2)+"_cl.jpg";
+            saveBufferAsImage(commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
+
+            outputFile="../output/evolutionLy_"+to_formatted_string(i, 2)+"_cl.jpg";
+            saveBufferAsImage(commandQueue_, evolution_[i].dy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
+
+            outputFile="../output/evolutionLxx_"+to_formatted_string(i, 2)+"_cl.jpg";
+            saveBufferAsImage(commandQueue_, evolution_[i].dxx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
+
+            outputFile="../output/evolutionLxy_"+to_formatted_string(i, 2)+"_cl.jpg";
+            saveBufferAsImage(commandQueue_, evolution_[i].dxy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
+
+            outputFile="../output/evolutionLyy_"+to_formatted_string(i, 2)+"_cl.jpg";
+            saveBufferAsImage(commandQueue_, evolution_[i].dyy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
+
             outputFile="../output/evolutionDet_"+to_formatted_string(i, 2)+"_cl.jpg";
             saveBufferAsImage(commandQueue_, evolution_[i].det, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile, options_.dthreshold);
         }
@@ -668,6 +638,21 @@ void AKAZE::Compute_Determinant_Hessian_Response()
 
         for(size_t i=0; i<evolution_.size(); ++i)
         {
+            outputFile="../output/evolutionLx_"+to_formatted_string(i, 2)+"_cl.csv";
+            saveBufferCsv(commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
+
+            outputFile="../output/evolutionLy_"+to_formatted_string(i, 2)+"_cl.csv";
+            saveBufferCsv(commandQueue_, evolution_[i].dy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
+
+            outputFile="../output/evolutionLxx_"+to_formatted_string(i, 2)+"_cl.csv";
+            saveBufferCsv(commandQueue_, evolution_[i].dxx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
+
+            outputFile="../output/evolutionLxy_"+to_formatted_string(i, 2)+"_cl.csv";
+            saveBufferCsv(commandQueue_, evolution_[i].dxy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
+
+            outputFile="../output/evolutionLyy_"+to_formatted_string(i, 2)+"_cl.csv";
+            saveBufferCsv(commandQueue_, evolution_[i].dyy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile.c_str());
+
             outputFile="../output/evolutionDet_"+to_formatted_string(i, 2)+"_cl.csv";
             saveBufferCsv(commandQueue_, evolution_[i].det,evolution_[i].offset, evolution_[i].width, evolution_[i].height, outputFile);
         }
@@ -781,7 +766,7 @@ void AKAZE::Find_Scale_Space_Extrema()
     subPixelRefinement(openclContext_, commandQueue_, evolutionDet_, evolutionInfo_, keypointsTempBuffer, keypointsCount_, keypointsBuffer_, keypointsCountBuffer, &events, event);
     event.wait();
     
-    timing_.subpixel=timer.elapsedMs();
+    timing_.subpixel=timer.elapsedMs()-timing_.extrema;
 }
 
 void AKAZE::Compute_Descriptors(std::vector<libAKAZE::Keypoint> &kpts, Descriptors &desc)

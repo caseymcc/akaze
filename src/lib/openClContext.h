@@ -24,7 +24,7 @@ struct KernelInfo
 };
 typedef std::shared_ptr<KernelInfo> SharedKernelInfo;
 
-::cl::Kernel getKernel(::cl::Context context, std::string kernelName, std::string fileName);
+::cl::Kernel &getKernel(::cl::Context context, std::string kernelName, std::string fileName);
 SharedKernelInfo getKernelInfo(::cl::Context context, std::string kernelName, std::string fileName);
 
 struct AKAZE_EXPORT OpenClDevice
