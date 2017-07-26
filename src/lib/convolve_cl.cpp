@@ -581,6 +581,12 @@ void scharrSeparable(::cl::Context &context, ::cl::CommandQueue &commandQueue, :
 
     ::cl::Buffer scratch(context, CL_MEM_READ_WRITE, width*height*sizeof(cl_float));
 
+    scharrSeparable(context, commandQueue, src, srcOffset, width, height, scale, yKernel, normalize, dst, dstOffset, kernelBuffer, kernelSize, scratch, events, event);
+}
+
+void scharrSeparable(::cl::Context &context, ::cl::CommandQueue &commandQueue, ::cl::Buffer &src, size_t srcOffset, size_t width, size_t height, float scale, bool yKernel, bool normalize,
+    ::cl::Buffer &dst, size_t dstOffset, ScharrSeparableKernel &kernelBuffer, int kernelSize, ::cl::Buffer scratch, std::vector<::cl::Event> *events, ::cl::Event *event)
+{
     if(yKernel)
         separableConvolve(context, commandQueue, src, srcOffset, width, height, kernelBuffer.smooth, kernelSize, kernelBuffer.edge, kernelSize, scale, dst, dstOffset, scratch, events, event);
     else

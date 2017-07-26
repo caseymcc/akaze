@@ -79,6 +79,8 @@ struct EvolutionCL:Evolution
     ::cl::Buffer dyy; //Second order spatial derivatives
 
     ::cl::Buffer det; //Detector response
+
+    ::cl::Image2D scratchBuffer;
 };
 
 struct KernelInfo;

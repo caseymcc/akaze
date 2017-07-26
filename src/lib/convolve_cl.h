@@ -90,6 +90,8 @@ AKAZE_EXPORT void scharrSeparable(::cl::Context &context, ::cl::CommandQueue &co
     ::cl::Buffer &dst, size_t dstOffset, std::vector<::cl::Event> *events, ::cl::Event &event);
 AKAZE_EXPORT void scharrSeparable(::cl::Context &context, ::cl::CommandQueue &commandQueue, ::cl::Buffer &src, size_t srcOffset, size_t width, size_t height, int size, float scale, bool yKernel, bool normalize,
     ::cl::Buffer &dst, size_t dstOffset, std::vector<::cl::Event> *events=nullptr, ::cl::Event *event=nullptr);
+AKAZE_EXPORT void scharrSeparable(::cl::Context &context, ::cl::CommandQueue &commandQueue, ::cl::Buffer &src, size_t srcOffset, size_t width, size_t height, float scale, bool yKernel, bool normalize,
+    ::cl::Buffer &dst, size_t dstOffset, ScharrSeparableKernel &kernelBuffer, int kernelSize, ::cl::Buffer scratch, std::vector<::cl::Event> *events, ::cl::Event *event);
 
 }}//namespace libAKAZE::cl
 

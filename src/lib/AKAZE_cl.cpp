@@ -491,37 +491,60 @@ void AKAZE::Feature_Detection()
 
 void AKAZE::Compute_Multiscale_Derivatives(std::vector<std::vector<::cl::Event>> &evolutionEvents)
 {
-    for(int i=0; i < (int)(evolution_.size()); i++)
+    std::vector<ScharrSeparableKernel> kernelBuffer(evolution_.size());
+    std::vector<int> kernelSize(evolution_.size());
+    std::vector<int> sigmaSize(evolution_.size());
+    
+    for(int i=0; i<(int)(evolution_.size()); i++)
     {
         float ratio=pow(2.f, (float)evolution_[i].octave);
-        int sigma_size_=fRound(evolution_[i].sigma * options_.derivative_factor/ratio);
+        sigmaSize[i]=fRound(evolution_[i].sigma * options_.derivative_factor/ratio);
 
-//        ::cl::Event lxEvent;
-//        ::cl::Event lyEvent;
-//        
-//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, false, true, evolution_[i].dx, evolution_[i].offset, nullptr, lxEvent);
-//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dy, evolution_[i].offset, nullptr, lyEvent);
-//
-//        std::vector<::cl::Event> lxCompleteEvent={lxEvent};
-//        std::vector<::cl::Event> lyCompleteEvent={lyEvent};
-//        std::vector<::cl::Event> events(3);
-//
-//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, false, true, evolution_[i].dxx, evolution_[i].offset, &lxCompleteEvent, events[0]);
-//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dxy, evolution_[i].offset, &lxCompleteEvent, events[1]);
-//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dyy, evolution_[i].offset, &lyCompleteEvent, events[2]);
-//
-//        evolutionEvents.push_back(events);
-//        commandQueue_.flush();
-
-        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, false, true, evolution_[i].dx, evolution_[i].offset, nullptr, nullptr);
-        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dy, evolution_[i].offset, nullptr, nullptr);
-
-        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, false, true, evolution_[i].dxx, evolution_[i].offset, nullptr, nullptr);
-        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dxy, evolution_[i].offset, nullptr, nullptr);
-        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dyy, evolution_[i].offset, nullptr, nullptr);
-
-        commandQueue_.flush();
+        kernelBuffer[i]=buildScharrSeparableKernel(openclContext_, sigmaSize[i], kernelSize[i], true);
     }
+
+    for(int i=0; i<(int)(evolution_.size()); i++)
+    {
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigmaSize[i], false, true, evolution_[i].dx, evolution_[i].offset, kernelBuffer[i], kernelSize[i], nullptr, nullptr);
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigmaSize[i], true, true, evolution_[i].dy, evolution_[i].offset, nullptr, nullptr);
+//
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigmaSize[i], false, true, evolution_[i].dxx, evolution_[i].offset, kernelBuffer[i], kernelSize[i], nullptr, nullptr);
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigmaSize[i], true, true, evolution_[i].dxy, evolution_[i].offset, kernelBuffer[i], kernelSize[i], nullptr, nullptr);
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigmaSize[i], true, true, evolution_[i].dyy, evolution_[i].offset, kernelBuffer[i], kernelSize[i], nullptr, nullptr);
+
+    }
+
+//    for(int i=0; i < (int)(evolution_.size()); i++)
+//    {
+//        float ratio=pow(2.f, (float)evolution_[i].octave);
+//        int sigma_size_=fRound(evolution_[i].sigma * options_.derivative_factor/ratio);
+//
+////        ::cl::Event lxEvent;
+////        ::cl::Event lyEvent;
+////        
+////        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, false, true, evolution_[i].dx, evolution_[i].offset, nullptr, lxEvent);
+////        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dy, evolution_[i].offset, nullptr, lyEvent);
+////
+////        std::vector<::cl::Event> lxCompleteEvent={lxEvent};
+////        std::vector<::cl::Event> lyCompleteEvent={lyEvent};
+////        std::vector<::cl::Event> events(3);
+////
+////        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, false, true, evolution_[i].dxx, evolution_[i].offset, &lxCompleteEvent, events[0]);
+////        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dxy, evolution_[i].offset, &lxCompleteEvent, events[1]);
+////        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dyy, evolution_[i].offset, &lyCompleteEvent, events[2]);
+////
+////        evolutionEvents.push_back(events);
+////        commandQueue_.flush();
+//
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, false, true, evolution_[i].dx, evolution_[i].offset, nullptr, nullptr);
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].smooth, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dy, evolution_[i].offset, nullptr, nullptr);
+//
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, false, true, evolution_[i].dxx, evolution_[i].offset, nullptr, nullptr);
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dx, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dxy, evolution_[i].offset, nullptr, nullptr);
+//        scharrSeparable(openclContext_, commandQueue_, evolution_[i].dy, evolution_[i].offset, evolution_[i].width, evolution_[i].height, sigma_size_, sigma_size_, true, true, evolution_[i].dyy, evolution_[i].offset, nullptr, nullptr);
+//
+//        commandQueue_.flush();
+//    }
 //    timing_.derivatives=timer.elapsedMs();
 }
 

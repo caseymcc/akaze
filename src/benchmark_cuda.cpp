@@ -1,6 +1,6 @@
-#include "benchmark_opencl.h"
+#include "benchmark_cuda.h"
 
-#ifdef AKAZE_USE_OPENCL
+#ifdef AKAZE_USE_CUDA
 
 #include "lib/convolve_cl.h"
 #include "lib/filters_cl.h"
@@ -215,24 +215,24 @@ void benchmarkOpenCLConvole(::cl::Context &context, ::cl::CommandQueue &queue, O
 
     std::cout<<"    Gauss Kernel"<<std::endl;
 
-//    benchmarkOpenCL_Gauss(context, queue, options, image, width, height, output, scratch, 0.79f);
-//    benchmarkOpenCL_Gauss(context, queue, options, image, width, height, output, scratch, 1.09f);
-//    benchmarkOpenCL_Gauss(context, queue, options, image, width, height, output, scratch, 1.39f);
-//    benchmarkOpenCL_Gauss(context, queue, options, image, width, height, output, scratch, 1.69f);
-//    benchmarkOpenCL_Gauss(context, queue, options, image, width, height, output, scratch, 1.99f);
-//    
-//    benchmarkOpenCL_Gauss_LocalXY(context, queue, options, image, width, height, output, 0.79f);
-//    benchmarkOpenCL_Gauss_LocalXY(context, queue, options, image, width, height, output, 1.09f);
-//    benchmarkOpenCL_Gauss_LocalXY(context, queue, options, image, width, height, output, 1.39f);
-//    benchmarkOpenCL_Gauss_LocalXY(context, queue, options, image, width, height, output, 1.69f);
-//    benchmarkOpenCL_Gauss_LocalXY(context, queue, options, image, width, height, output, 1.99f);
+    benchmarkOpenCL_Gauss(context, queue, options, image, width, height, output, scratch, 0.79f);
+    benchmarkOpenCL_Gauss(context, queue, options, image, width, height, output, scratch, 1.09f);
+    benchmarkOpenCL_Gauss(context, queue, options, image, width, height, output, scratch, 1.39f);
+    benchmarkOpenCL_Gauss(context, queue, options, image, width, height, output, scratch, 1.69f);
+    benchmarkOpenCL_Gauss(context, queue, options, image, width, height, output, scratch, 1.99f);
+    
+    benchmarkOpenCL_Gauss_LocalXY(context, queue, options, image, width, height, output, 0.79f);
+    benchmarkOpenCL_Gauss_LocalXY(context, queue, options, image, width, height, output, 1.09f);
+    benchmarkOpenCL_Gauss_LocalXY(context, queue, options, image, width, height, output, 1.39f);
+    benchmarkOpenCL_Gauss_LocalXY(context, queue, options, image, width, height, output, 1.69f);
+    benchmarkOpenCL_Gauss_LocalXY(context, queue, options, image, width, height, output, 1.99f);
     
     std::cout<<"    Scharr Kernel"<<std::endl;
 
-//    benchmarkOpenCL_Scharr(context, queue, options, image, width, height, output, scratch, 1);
-//    benchmarkOpenCL_Scharr(context, queue, options, image, width, height, output, scratch, 2);
-//    benchmarkOpenCL_Scharr(context, queue, options, image, width, height, output, scratch, 3);
-//    benchmarkOpenCL_Scharr(context, queue, options, image, width, height, output, scratch, 4);
+    benchmarkOpenCL_Scharr(context, queue, options, image, width, height, output, scratch, 1);
+    benchmarkOpenCL_Scharr(context, queue, options, image, width, height, output, scratch, 2);
+    benchmarkOpenCL_Scharr(context, queue, options, image, width, height, output, scratch, 3);
+    benchmarkOpenCL_Scharr(context, queue, options, image, width, height, output, scratch, 4);
 
 //    benchmarkOpenCL_Scharr_Local(context, queue, options, image, width, height, output, scratch, 1);
 //    benchmarkOpenCL_Scharr_Local(context, queue, options, image, width, height, output, scratch, 2);
@@ -257,8 +257,6 @@ void benchmarkOpenCLAKAZE(::cl::Context &context, ::cl::CommandQueue &queue, Opt
     libAKAZE::cl::AKAZE evolution(context, queue, akaze_options);
 
     evolution.initOpenCL(); //gets some items loaded early
-
-//    evolution.Create_Nonlinear_Scale_Space(image);
 
     timer.reset();
 
@@ -316,8 +314,8 @@ void benchmarkOpenCLDevice(::cl::Context &openClContext, RowMatrixXf &image, Opt
 
     ::cl::WaitForEvents(bufferEvents);
 
-    benchmarkOpenCLConvole(openClContext, commandQueue, options, imageCL, image.cols(), image.rows(), outputCL);
-//    benchmarkOpenCLAKAZE(openClContext, commandQueue, options, image);
+//    benchmarkOpenCLConvole(openClContext, commandQueue, options, imageCL, image.cols(), image.rows(), outputCL);
+    benchmarkOpenCLAKAZE(openClContext, commandQueue, options, image);
 }
 
 #endif//AKAZE_USE_OPENCL
